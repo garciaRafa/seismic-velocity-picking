@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.npy
+*.segy
+*.h5
+data/shots/
+data/cdp_gathers/
+.ipynb_checkpoints/
+*.egg-info/
+dist/
+build/
