@@ -1,5 +1,5 @@
 # Seismic Velocity Picking
-Automated seismic velocity picking using metaheuristics on GPU (CUDA/CuPy).
+Automated seismic velocity picking using metaheuristics.
 ## Setup
 ```bash
 python3 -m venv .venv
