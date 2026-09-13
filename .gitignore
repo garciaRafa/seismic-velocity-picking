@@ -1,15 +1,18 @@
-# Dados gerados
+# Heavy data files
 data/models/
 data/cdp_gathers/
 data/semblance/
 
-# Resultados gerados
+# Generated results
 results/picks/
 results/metrics/
 results/figures/
 results/logs/
 
-# Extensões de dados pesados
+# Exception — preserve folder structure
+!**/.gitkeep
+
+# Heavy data extensions
 *.segy
 *.npy
 *.h5
@@ -24,6 +27,5 @@ __pycache__/
 # Jupyter
 .ipynb_checkpoints/
 
-# Sistema
+# System
 .DS_Store
-push origin main*/.gitkeep
