@@ -1,12 +1,28 @@
+# Dados gerados
+data/models/
+data/cdp_gathers/
+data/semblance/
+
+# Resultados gerados
+results/picks/
+results/metrics/
+results/figures/
+results/logs/
+
+# Extensões de dados pesados
+*.segy
+*.npy
+*.h5
+*.tar.gz
+
+# Python
 .venv/
 __pycache__/
 *.pyc
-*.npy
-*.segy
-*.h5
-data/shots/
-data/cdp_gathers/
-.ipynb_checkpoints/
 *.egg-info/
-dist/
-build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Sistema
+.DS_Store
