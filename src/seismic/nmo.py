@@ -4,12 +4,16 @@ src/seismic/nmo.py
 Normal Moveout (NMO) correction.
 Based on the hyperbolic travel time equation (Yilmaz, 2001):
 
-    t^2 = t0^2 + x^2 / v^2
+    t^2 = t0^2 + (1000 * x / v)^2
 
 where:
+    t  = NMO travel time (ms)
     t0 = zero-offset two-way travel time (ms)
     x  = source-receiver offset (m)
     v  = stacking velocity (m/s)
+
+The factor 1000 converts the offset term x / v from seconds to ms, so
+that both terms of the sum are in the same unit.
 """
 
 import numpy as np
@@ -32,7 +36,8 @@ def nmo_times(t0_array, offsets, velocity):
     t0 = t0_array[np.newaxis, :]        # (1, n_samples)
     x  = offsets[:, np.newaxis]         # (n_traces, 1)
 
-    t_nmo = np.sqrt(t0**2 + (x**2) / (velocity**2))
+    # Offset term is (x / v) in seconds, so convert it to ms before summing
+    t_nmo = np.sqrt(t0**2 + (x / velocity * 1000.0) ** 2)
 
     return t_nmo.astype(np.float32)
 

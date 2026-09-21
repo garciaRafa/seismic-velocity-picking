@@ -6,12 +6,15 @@ Generates CDP gathers from a velocity model using the
 hyperbolic NMO equation and a Ricker wavelet source.
 
 Physics:
-    t(x)^2 = t0^2 + x^2 / v_rms^2
+    t(x)^2 = t0^2 + (1000 * x / v_rms)^2
 
 where:
-    t0    = zero-offset two-way travel time
-    x     = source-receiver offset
-    v_rms = RMS velocity at time t0
+    t     = travel time at offset x (ms)
+    t0    = zero-offset two-way travel time (ms)
+    x     = source-receiver offset (m)
+    v_rms = RMS velocity at time t0 (m/s)
+
+The factor 1000 converts x / v_rms from seconds to ms.
 """
 
 import numpy as np
@@ -173,7 +176,8 @@ def generate_trace(t_grid, v_rms, reflectivity_time,
         if v < 1.0:
             continue
 
-        t_nmo_ms = np.sqrt(t0**2 + (offset_m**2) / (v**2))
+        # NMO time: t^2 = t0^2 + (1000 * x / v)^2  (t in ms, x in m, v in m/s)
+        t_nmo_ms = np.sqrt(t0**2 + (offset_m / v * 1000.0) ** 2)
         idx = int(round(t_nmo_ms / dt_ms))
 
         if 0 <= idx < n:
