@@ -88,15 +88,17 @@ class BaseOptimizer(ABC):
             self.traces, self.offsets, picks, self.dt_ms
         )
 
-    def _is_valid(self, picks):
+        def _is_valid(self, picks):
         """
         Check physical plausibility constraints:
         - velocities within [vel_min, vel_max]
+        - times within valid sample range and distinct
         - velocities increase monotonically with time
-        - times within valid sample range
         """
-        times = [p[0] for p in picks]
-        vels  = [p[1] for p in picks]
+        # Sort by time so the check does not depend on list order
+        ordered = sorted(picks, key=lambda p: p[0])
+        times = [p[0] for p in ordered]
+        vels  = [p[1] for p in ordered]
 
         # Velocity bounds
         if any(v < self.vel_min or v > self.vel_max for v in vels):
@@ -106,7 +108,11 @@ class BaseOptimizer(ABC):
         if any(t < 0 or t >= self.n_samples for t in times):
             return False
 
-        # Monotonic velocity increase with depth
+        # Two picks at the same time are redundant
+        if len(set(times)) != len(times):
+            return False
+
+        # Monotonic velocity increase with time
         for i in range(1, len(vels)):
             if vels[i] < vels[i - 1]:
                 return False
