@@ -88,7 +88,7 @@ class BaseOptimizer(ABC):
             self.traces, self.offsets, picks, self.dt_ms
         )
 
-        def _is_valid(self, picks):
+    def _is_valid(self, picks):
         """
         Check physical plausibility constraints:
         - velocities within [vel_min, vel_max]
