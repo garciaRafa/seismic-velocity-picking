@@ -1,0 +1,39 @@
+{
+  "name": "hill_climbing_layers_quick",
+  "model": {
+    "source": "layers",
+    "velocities": [1500.0, 2000.0, 2600.0],
+    "thicknesses_m": [600.0, 700.0],
+    "total_depth_m": 3500.0,
+    "spacing_m": 1.25
+  },
+  "acquisition": {
+    "n_offsets": 50,
+    "offset_min_m": 100.0,
+    "offset_max_m": 3000.0,
+    "dt_ms": 2.0,
+    "t_max_ms": 3000.0,
+    "f0_hz": 30.0,
+    "noise_level": 0.05
+  },
+  "optimizer": {
+    "name": "HillClimbing",
+    "params": {
+      "vel_min": 1400.0,
+      "vel_max": 3000.0,
+      "n_picks": 2,
+      "max_iter": 100,
+      "restarts": 3,
+      "step_time": 5,
+      "step_vel": 50.0,
+      "n_neighbors": 20,
+      "patience": 20,
+      "max_evals": null
+    }
+  },
+  "experiment": {
+    "n_runs": 3,
+    "master_seed": 1,
+    "data_seed": 0
+  }
+}

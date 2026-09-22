@@ -8,6 +8,7 @@ results/picks/
 results/metrics/
 results/figures/
 results/logs/
+results/experiments/
 
 # Exception — preserve folder structure
 !**/.gitkeep
