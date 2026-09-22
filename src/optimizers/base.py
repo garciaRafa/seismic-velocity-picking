@@ -225,6 +225,7 @@ class BaseOptimizer(ABC):
             times, vels = optimizer.get_result()
         """
         self._reset_run_state()
+        self.rng = np.random.default_rng(self.seed)   # same seed, same run
         self._initialize()
 
         t_start = time.perf_counter()
