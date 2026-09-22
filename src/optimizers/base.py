@@ -30,6 +30,22 @@ class BaseOptimizer(ABC):
     seed       : int   — random seed for reproducibility
     max_evals  : int or None — budget of objective evaluations (one
                  evaluation = one full solution). None means no budget.
+    min_sep_ms : float — minimum time separation between consecutive
+                 picks, in ms. 0 (default) only requires distinct times.
+    t_min_ms   : float — earliest time allowed for a pick, in ms
+                 (default 0). Use it to exclude trace segments without
+                 reflections, such as the water layer.
+    t_max_ms   : float or None — latest time allowed for a pick, in ms
+                 (default: end of the record). Use it to exclude the end
+                 of the record, where far-offset traces leave the record
+                 and semblance is limited by the fraction of live traces.
+
+    Formulation
+    -----------
+    With the defaults (min_sep_ms=0, t_min_ms=0, t_max_ms=None) the
+    constraints and the random draws are exactly those of formulation v1,
+    so earlier results are reproduced. Setting the three parameters gives
+    formulation v2.
 
     Randomness
     ----------
@@ -42,7 +58,8 @@ class BaseOptimizer(ABC):
 
     def __init__(self, traces, offsets, dt_ms,
                  vel_min=1500.0, vel_max=5000.0,
-                 n_picks=10, max_iter=200, seed=42, max_evals=None):
+                 n_picks=10, max_iter=200, seed=42, max_evals=None,
+                 min_sep_ms=0.0, t_min_ms=0.0, t_max_ms=None):
 
         self.traces   = traces
         self.offsets  = offsets
@@ -55,6 +72,22 @@ class BaseOptimizer(ABC):
         self.max_evals = max_evals
 
         self.n_traces, self.n_samples = traces.shape
+
+        # Time constraints, converted from ms to sample indices
+        self.min_sep_ms = float(min_sep_ms)
+        self.t_min_ms   = float(t_min_ms)
+        self.t_max_ms   = t_max_ms
+        self.min_sep = max(1, int(np.ceil(self.min_sep_ms / dt_ms - 1e-9)))
+        self.t_min   = max(0, int(np.ceil(self.t_min_ms / dt_ms - 1e-9)))
+        self.t_max   = (self.n_samples - 1 if t_max_ms is None else
+                        min(self.n_samples - 1,
+                            int(np.floor(t_max_ms / dt_ms + 1e-9))))
+
+        if (self.n_picks - 1) * self.min_sep > self.t_max - self.t_min:
+            raise ValueError(
+                f"{self.n_picks} picks separated by {self.min_sep_ms} ms "
+                f"do not fit between {self.t_min_ms} and {t_max_ms} ms."
+            )
 
         # Own random generator (see "Randomness" above)
         self.rng = np.random.default_rng(seed)
@@ -126,7 +159,9 @@ class BaseOptimizer(ABC):
         """
         Check physical plausibility constraints:
         - velocities within [vel_min, vel_max]
-        - times within valid sample range and distinct
+        - times within [t_min, t_max] (sample indices)
+        - consecutive times separated by at least min_sep samples
+          (min_sep = 1 means only distinct times)
         - velocities increase monotonically with time
         """
         # Sort by time so the check does not depend on list order
@@ -138,13 +173,15 @@ class BaseOptimizer(ABC):
         if any(v < self.vel_min or v > self.vel_max for v in vels):
             return False
 
-        # Time bounds
-        if any(t < 0 or t >= self.n_samples for t in times):
+        # Time bounds (allowed time window)
+        if any(t < self.t_min or t > self.t_max for t in times):
             return False
 
-        # Two picks at the same time are redundant
-        if len(set(times)) != len(times):
-            return False
+        # Minimum separation between consecutive picks (also rejects
+        # repeated times, which are always redundant)
+        for i in range(1, len(times)):
+            if times[i] - times[i - 1] < self.min_sep:
+                return False
 
         # Monotonic velocity increase with time
         for i in range(1, len(vels)):
@@ -154,10 +191,21 @@ class BaseOptimizer(ABC):
         return True
 
     def _random_picks(self):
-        """Generate a random valid set of picks."""
-        times = sorted(int(t) for t in self.rng.choice(
-            self.n_samples, self.n_picks, replace=False
+        """
+        Generate a random valid set of picks.
+
+        Times are drawn uniformly among all sets that respect the time
+        window and the minimum separation: K distinct values are drawn
+        from a reduced range and then spread apart by (min_sep - 1)
+        samples each. With min_sep = 1 and the full window this is
+        exactly the formulation v1 draw.
+        """
+        gap    = self.min_sep - 1
+        n_free = (self.t_max - self.t_min) - (self.n_picks - 1) * gap + 1
+        base   = sorted(int(t) for t in self.rng.choice(
+            n_free, self.n_picks, replace=False
         ))
+        times = [self.t_min + b + i * gap for i, b in enumerate(base)]
         vels = sorted(float(v) for v in self.rng.uniform(
             self.vel_min, self.vel_max, self.n_picks
         ))

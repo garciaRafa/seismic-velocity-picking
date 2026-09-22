@@ -41,6 +41,8 @@ class HillClimbing(BaseOptimizer):
                           restart is considered stuck in a local optimum
     max_evals   : int or None — budget of objective evaluations for the
                           whole run (all restarts). None = no budget.
+    min_sep_ms, t_min_ms, t_max_ms : time constraints of the formulation
+                          (see BaseOptimizer). Defaults = formulation v1.
 
     Reproducibility
     ---------------
@@ -55,11 +57,13 @@ class HillClimbing(BaseOptimizer):
                  n_picks=10, max_iter=200, seed=42,
                  step_time=5, step_vel=50.0,
                  n_neighbors=20, restarts=5, patience=20,
-                 max_evals=None):
+                 max_evals=None, min_sep_ms=0.0, t_min_ms=0.0,
+                 t_max_ms=None):
 
         super().__init__(traces, offsets, dt_ms,
                          vel_min, vel_max,
-                         n_picks, max_iter, seed, max_evals)
+                         n_picks, max_iter, seed, max_evals,
+                         min_sep_ms, t_min_ms, t_max_ms)
 
         self.step_time   = step_time
         self.step_vel    = step_vel
@@ -132,7 +136,7 @@ class HillClimbing(BaseOptimizer):
 
         # Perturb time
         dt = int(self.rng.integers(-self.step_time, self.step_time + 1))
-        t_new = int(np.clip(t + dt, 0, self.n_samples - 1))
+        t_new = int(np.clip(t + dt, self.t_min, self.t_max))
 
         # Perturb velocity
         dv = float(self.rng.uniform(-self.step_vel, self.step_vel))
