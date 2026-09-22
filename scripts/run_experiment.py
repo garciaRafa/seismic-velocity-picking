@@ -38,15 +38,18 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+from src.analysis.metrics import count_correct_picks        # noqa: E402
 from src.analysis.metrics import velocity_errors            # noqa: E402
 from src.analysis.stats import summarize                    # noqa: E402
 from src.optimizers.hill_climbing import HillClimbing       # noqa: E402
+from src.optimizers.random_search import RandomSearch       # noqa: E402
 from src.seismic.models import layered_velocity_profile     # noqa: E402
 from src.seismic.synthetic import generate_cdp_gather       # noqa: E402
 
 # Optimizers available to configs (add new algorithms here)
 OPTIMIZERS = {
     'HillClimbing': HillClimbing,
+    'RandomSearch': RandomSearch,
 }
 
 
@@ -179,6 +182,8 @@ def main():
         times_s, vels = opt.get_result()
         times_ms = times_s * dt_ms
         err = velocity_errors(times_ms, vels, t_grid, v_rms)
+        ok  = count_correct_picks(times_ms, vels, t_grid, v_rms,
+                                  tol=exp.get('correct_tol', 0.02))
 
         record = {
             'run':         i,
@@ -187,12 +192,15 @@ def main():
             'rmse':        err['rmse'],
             'mae':         err['mae'],
             'mape':        err['mape'],
+            'n_correct':   ok['n_correct'],
+            'frac_correct': ok['frac_correct'],
             'exec_time_s': float(opt.exec_time_s),
             'n_evals':     int(opt.n_evals),
             'picks_time_ms':  [float(t) for t in times_ms],
             'picks_vel_ms':   [float(v) for v in vels],
             'v_true':         err['v_true'],
             'errors':         err['errors'],
+            'correct':        ok['correct'],
             'eval_history':   [[int(e), float(s)] for e, s in opt.eval_history],
         }
         # Algorithm-specific extras (present only in some optimizers)
@@ -202,7 +210,8 @@ def main():
         runs.append(record)
 
         print(f"  run {i + 1:3d}/{exp['n_runs']}  seed={int(seed):10d}  "
-              f"score={record['best_score']:.4f}  rmse={record['rmse']:7.2f}  "
+              f"score={record['best_score']:.4f}  correct={record['n_correct']:2d}  "
+              f"rmse={record['rmse']:7.2f}  "
               f"evals={record['n_evals']:6d}  time={record['exec_time_s']:6.1f}s")
 
         # Save after every run, so an interrupted experiment keeps its data
@@ -211,14 +220,15 @@ def main():
 
     summary = {
         key: summarize([r[key] for r in runs])
-        for key in ('best_score', 'rmse', 'mae', 'mape', 'exec_time_s', 'n_evals')
+        for key in ('best_score', 'n_correct', 'rmse', 'mae', 'mape',
+                    'exec_time_s', 'n_evals')
     }
     summary['total_time_s'] = time.perf_counter() - t_all
     with open(os.path.join(out_dir, 'summary.json'), 'w') as f:
         json.dump(summary, f, indent=2)
 
     print('\nSummary (mean ± std, [min, max])')
-    for key in ('best_score', 'rmse', 'exec_time_s', 'n_evals'):
+    for key in ('best_score', 'n_correct', 'rmse', 'exec_time_s', 'n_evals'):
         s = summary[key]
         print(f"  {key:12s} {s['mean']:10.4f} ± {s['std']:<10.4f} "
               f"[{s['min']:.4f}, {s['max']:.4f}]")
