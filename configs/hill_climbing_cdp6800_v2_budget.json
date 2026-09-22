@@ -1,0 +1,41 @@
+{
+  "name": "hill_climbing_cdp6800_v2_budget",
+  "model": {
+    "source": "marmousi2",
+    "models_dir": "data/models/marmousi2",
+    "cdp_idx": 6800
+  },
+  "acquisition": {
+    "n_offsets": 50,
+    "offset_min_m": 100.0,
+    "offset_max_m": 3000.0,
+    "dt_ms": 2.0,
+    "t_max_ms": 3000.0,
+    "f0_hz": 30.0,
+    "noise_level": 0.05
+  },
+  "optimizer": {
+    "name": "HillClimbing",
+    "params": {
+      "vel_min": 1400.0,
+      "vel_max": 3000.0,
+      "n_picks": 10,
+      "max_iter": 300,
+      "restarts": 5,
+      "step_time": 5,
+      "step_vel": 50.0,
+      "n_neighbors": 30,
+      "patience": 60,
+      "max_evals": 33000,
+      "min_sep_ms": 100.0,
+      "t_min_ms": 600.0,
+      "t_max_ms": 2700.0
+    }
+  },
+  "experiment": {
+    "n_runs": 30,
+    "master_seed": 2026,
+    "data_seed": 42,
+    "correct_tol": 0.02
+  }
+}

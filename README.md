@@ -25,6 +25,18 @@ python scripts/run_experiment.py configs/hill_climbing_cdp6800.json        # 30 
 python scripts/run_experiment.py configs/hill_climbing_cdp6800_v2.json     # 30 runs, formulation v2
 ```
 
+**Hill climbing vs. random search** (same seeds, same budget of 33,000
+evaluations, formulation v2), then a paired comparison with the Wilcoxon
+signed-rank test:
+```bash
+python scripts/run_experiment.py configs/hill_climbing_cdp6800_v2_budget.json
+python scripts/run_experiment.py configs/random_search_cdp6800_v2_budget.json
+python scripts/compare_experiments.py results/experiments/hill_climbing_cdp6800_v2_budget_<date> \
+                                      results/experiments/random_search_cdp6800_v2_budget_<date>
+```
+Each run also reports `n_correct`: picks whose velocity is within 2% of the
+true RMS velocity (`experiment.correct_tol`).
+
 **Formulations:** v1 only requires distinct pick times. v2 adds a minimum
 separation between picks (`min_sep_ms`) and an allowed time window
 (`t_min_ms`, `t_max_ms`), which excludes the water layer and the end of
