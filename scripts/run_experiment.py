@@ -43,7 +43,8 @@ from src.analysis.metrics import velocity_errors            # noqa: E402
 from src.analysis.stats import summarize                    # noqa: E402
 from src.optimizers.hill_climbing import HillClimbing       # noqa: E402
 from src.optimizers.random_search import RandomSearch       # noqa: E402
-from src.seismic.models import layered_velocity_profile     # noqa: E402
+from src.seismic.cases import (build_velocity_profile,      # noqa: E402
+                               load_case, water_bottom_time_ms)
 from src.seismic.synthetic import generate_cdp_gather       # noqa: E402
 
 # Optimizers available to configs (add new algorithms here)
@@ -57,30 +58,29 @@ OPTIMIZERS = {
 # Data                                                                 #
 # ------------------------------------------------------------------ #
 
-def build_velocity_profile(model_cfg):
-    """Return (velocity profile in depth, depth spacing in m)."""
-    source = model_cfg['source']
-
-    if source == 'marmousi2':
-        from src.seismic.io import load_marmousi2_velocity
-        models_dir = os.path.join(ROOT, model_cfg['models_dir'])
-        vel_model, info = load_marmousi2_velocity(models_dir, verbose=False)
-        return vel_model[model_cfg['cdp_idx'], :], info['spacing_m']
-
-    if source == 'layers':
-        spacing = model_cfg.get('spacing_m', 1.25)
-        profile = layered_velocity_profile(
-            model_cfg['velocities'], model_cfg['thicknesses_m'],
-            spacing_m=spacing, total_depth_m=model_cfg.get('total_depth_m')
-        )
-        return profile, spacing
-
-    raise ValueError(f"Unknown model source: {source}")
-
-
 def build_gather(cfg):
+    """
+    Data of one experiment.
+
+    model.source == "case": load a saved test case (model.path, relative
+    to the project root). Otherwise the gather is generated from the model
+    config ("marmousi2" or "layers") with the acquisition parameters.
+
+    Returns
+    -------
+    dict with gather, offsets, t_grid, v_rms, dt_ms, water_bottom_ms
+    """
+    model = cfg['model']
+
+    if model['source'] == 'case':
+        c = load_case(os.path.join(ROOT, model['path']))
+        return {'gather': c['gather'], 'offsets': c['offsets'],
+                't_grid': c['t_grid'], 'v_rms': c['v_rms_true'],
+                'dt_ms': c['dt_ms'],
+                'water_bottom_ms': c['meta']['water_bottom_ms']}
+
     acq = cfg['acquisition']
-    profile, spacing = build_velocity_profile(cfg['model'])
+    profile, spacing = build_velocity_profile(model, ROOT)
     offsets = np.linspace(acq['offset_min_m'], acq['offset_max_m'],
                           acq['n_offsets'], dtype=np.float32)
     gather, t_grid, v_rms = generate_cdp_gather(
@@ -89,7 +89,20 @@ def build_gather(cfg):
         f0_hz=acq['f0_hz'], noise_level=acq['noise_level'],
         seed=cfg['experiment']['data_seed'],
     )
-    return gather, offsets, t_grid, v_rms
+    return {'gather': gather, 'offsets': offsets, 't_grid': t_grid,
+            'v_rms': v_rms, 'dt_ms': acq['dt_ms'],
+            'water_bottom_ms': water_bottom_time_ms(profile, spacing)}
+
+
+def resolve_params(params, data):
+    """
+    Replace "auto" values that depend on the data:
+    t_min_ms = "auto" -> two-way time of the water bottom of the case.
+    """
+    params = dict(params)
+    if params.get('t_min_ms') == 'auto':
+        params['t_min_ms'] = float(data['water_bottom_ms'])
+    return params
 
 
 # ------------------------------------------------------------------ #
@@ -152,7 +165,6 @@ def main():
     exp      = cfg['experiment']
     opt_cfg  = cfg['optimizer']
     opt_cls  = OPTIMIZERS[opt_cfg['name']]
-    dt_ms    = cfg['acquisition']['dt_ms']
 
     metadata = collect_metadata()
     if metadata['git_dirty']:
@@ -168,15 +180,19 @@ def main():
 
     print(f"Experiment : {cfg['name']}")
     print(f"Output     : {out_dir}")
-    gather, offsets, t_grid, v_rms = build_gather(cfg)
-    print(f"Gather     : {gather.shape}, data_seed={exp['data_seed']}")
+    data = build_gather(cfg)
+    gather, offsets = data['gather'], data['offsets']
+    t_grid, v_rms, dt_ms = data['t_grid'], data['v_rms'], data['dt_ms']
+    params = resolve_params(opt_cfg['params'], data)
+    source = cfg['model'].get('path', f"data_seed={exp.get('data_seed')}")
+    print(f"Gather     : {gather.shape}, {source}")
 
     run_seeds = np.random.SeedSequence(exp['master_seed']).generate_state(exp['n_runs'])
 
     runs = []
     t_all = time.perf_counter()
     for i, seed in enumerate(run_seeds):
-        opt = opt_cls(gather, offsets, dt_ms, seed=int(seed), **opt_cfg['params'])
+        opt = opt_cls(gather, offsets, dt_ms, seed=int(seed), **params)
         opt.run()
 
         times_s, vels = opt.get_result()
