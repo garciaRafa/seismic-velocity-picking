@@ -117,6 +117,37 @@ def resample_to_regular_time(t0_ms, v_rms, dt_ms, t_max_ms):
 # Reflectivity                                                        #
 # ------------------------------------------------------------------ #
 
+def _accumulate_on_time_grid(times_ms, values, dt_ms, n_samples):
+    """
+    Place values given at irregular times onto a regular time grid,
+    splitting each value between its two neighboring samples with
+    linear weights. The total (sum of values) is preserved.
+
+    Parameters
+    ----------
+    times_ms  : np.ndarray — irregular times in ms
+    values    : np.ndarray — value at each time (same length)
+    dt_ms     : float      — output sampling interval in ms
+    n_samples : int        — number of output samples
+
+    Returns
+    -------
+    out : np.ndarray, float32, shape (n_samples,)
+    """
+    pos   = np.asarray(times_ms, dtype=np.float64) / dt_ms
+    lo    = np.floor(pos).astype(int)
+    frac  = pos - lo
+    vals  = np.asarray(values, dtype=np.float64)
+    out   = np.zeros(n_samples, dtype=np.float64)
+
+    ok_lo = (lo >= 0) & (lo < n_samples)
+    ok_hi = (lo + 1 >= 0) & (lo + 1 < n_samples)
+    np.add.at(out, lo[ok_lo],     vals[ok_lo] * (1.0 - frac[ok_lo]))
+    np.add.at(out, lo[ok_hi] + 1, vals[ok_hi] * frac[ok_hi])
+
+    return out.astype(np.float32)
+
+
 def compute_reflectivity(vel_profile):
     """
     Compute reflection coefficients from velocity contrasts.
@@ -208,7 +239,10 @@ def generate_cdp_gather(vel_profile, spacing_m, offsets_m,
     t_max_ms    : float      — maximum record time in ms (default 3000)
     f0_hz       : float      — Ricker wavelet frequency in Hz (default 30)
     noise_level : float      — Gaussian noise amplitude (default 0.05)
-    seed        : int        — random seed for reproducibility
+    seed        : int        — random seed of the noise, for
+                               reproducibility. The noise uses its own
+                               generator, so the global np.random state
+                               is not touched.
 
     Returns
     -------
@@ -216,8 +250,8 @@ def generate_cdp_gather(vel_profile, spacing_m, offsets_m,
     t_grid  : np.ndarray — time axis in ms
     v_rms   : np.ndarray — RMS velocity on time grid (m/s)
     """
-    if seed is not None:
-        np.random.seed(seed)
+    # Own random generator for the noise (independent of any other code)
+    rng = np.random.default_rng(seed)
 
     # 1. Depth to time conversion
     t0_ms, v_rms_depth = depth_to_time(vel_profile, spacing_m)
@@ -227,9 +261,16 @@ def generate_cdp_gather(vel_profile, spacing_m, offsets_m,
                                               dt_ms, t_max_ms)
     n_samples = len(t_grid)
 
-    # 3. Reflectivity in depth → resample to time
+    # 3. Reflectivity in depth → time.
+    #    Each reflection coefficient is split between the two time samples
+    #    around its exact time (linear weights), so no reflection is lost.
+    #    Interpolating the spike series (np.interp) would drop every spike
+    #    whose neighbors in depth fall between the same two time samples,
+    #    which happens often in fast layers (1.25 m of rock at 2500 m/s
+    #    takes only 1 ms of two-way time, less than dt_ms).
     refl_depth = compute_reflectivity(vel_profile)
-    refl_time  = np.interp(t_grid, t0_ms, refl_depth).astype(np.float32)
+    refl_time  = _accumulate_on_time_grid(t0_ms, refl_depth,
+                                          dt_ms, n_samples)
 
     # 4. Ricker wavelet
     wavelet, _ = ricker_wavelet(dt_ms, f0_hz)
@@ -243,7 +284,7 @@ def generate_cdp_gather(vel_profile, spacing_m, offsets_m,
                                offset, wavelet, dt_ms)
         # Add Gaussian noise
         if noise_level > 0:
-            noise  = np.random.randn(n_samples).astype(np.float32)
+            noise  = rng.standard_normal(n_samples).astype(np.float32)
             noise *= noise_level * np.abs(trace).max()
             trace += noise
 
