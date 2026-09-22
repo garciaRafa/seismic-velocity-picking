@@ -1,0 +1,30 @@
+{
+  "name": "t1_all_cases",
+  "cases_dir": "cases",
+  "cases": "all",
+  "n_runs": 10,
+  "master_seed": 2026,
+  "correct_tol": 0.02,
+  "formulation": {
+    "vel_min": 1400.0,
+    "vel_max": 3000.0,
+    "n_picks": 10,
+    "min_sep_ms": 100.0,
+    "t_min_ms": "auto",
+    "t_max_ms": 2700.0
+  },
+  "algorithms": {
+    "HillClimbing": {
+      "max_iter": 300,
+      "restarts": 5,
+      "step_time": 5,
+      "step_vel": 50.0,
+      "n_neighbors": 30,
+      "patience": 60,
+      "max_evals": 33000
+    },
+    "RandomSearch": {
+      "max_evals": 33000
+    }
+  }
+}

@@ -24,17 +24,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from src.analysis.stats import wilcoxon_signed_rank    # noqa: E402
-
-# metric -> True if higher is better
-METRICS = {
-    'best_score':  True,
-    'n_correct':   True,
-    'rmse':        False,
-    'mae':         False,
-    'exec_time_s': False,
-    'n_evals':     False,
-}
+from src.analysis.compare import paired_table    # noqa: E402
 
 
 def load(folder):
@@ -56,9 +46,7 @@ def main():
     runs_b, cfg_b = load(args.folder_b)
 
     # Paired comparison only makes sense with the same seeds, in order
-    seeds_a = [r['seed'] for r in runs_a]
-    seeds_b = [r['seed'] for r in runs_b]
-    if seeds_a != seeds_b:
+    if [r['seed'] for r in runs_a] != [r['seed'] for r in runs_b]:
         sys.exit("The experiments do not use the same seeds; "
                  "a paired comparison is not valid.")
 
@@ -74,22 +62,8 @@ def main():
     print(header)
     print('-' * len(header))
 
-    table = {}
-    for key, higher_is_better in METRICS.items():
-        if key not in runs_a[0] or key not in runs_b[0]:
-            continue
-        a = np.array([r[key] for r in runs_a], dtype=float)
-        b = np.array([r[key] for r in runs_b], dtype=float)
-        better_a = a > b if higher_is_better else a < b
-        better_b = b > a if higher_is_better else b < a
-        test = wilcoxon_signed_rank(a, b)
-        table[key] = {
-            'median_a': float(np.median(a)), 'median_b': float(np.median(b)),
-            'mean_a':   float(a.mean()),     'mean_b':   float(b.mean()),
-            'a_wins':   int(better_a.sum()), 'b_wins':   int(better_b.sum()),
-            'wilcoxon_p': test['p_value'],
-        }
-        t = table[key]
+    table = paired_table(runs_a, runs_b)
+    for key, t in table.items():
         print(f"{key:12s} {t['median_a']:10.3f} {t['median_b']:10.3f} "
               f"{t['mean_a']:10.3f} {t['mean_b']:10.3f} {t['a_wins']:7d} "
               f"{t['b_wins']:7d} {t['wilcoxon_p']:9.4f}")

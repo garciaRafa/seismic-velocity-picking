@@ -144,6 +144,65 @@ def collect_metadata():
 
 
 # ------------------------------------------------------------------ #
+# One run                                                              #
+# ------------------------------------------------------------------ #
+
+SUMMARY_KEYS = ('best_score', 'n_correct', 'rmse', 'mae', 'mape',
+                'exec_time_s', 'n_evals')
+
+
+def run_single(opt_cls, params, data, seed, run_index, tol=0.02):
+    """
+    Run one optimizer once and return the record saved in runs.json.
+
+    The result depends only on (data, params, seed), so runs can be
+    executed in any order or in parallel with identical results.
+    """
+    opt = opt_cls(data['gather'], data['offsets'], data['dt_ms'],
+                  seed=int(seed), **params)
+    opt.run()
+
+    times_s, vels = opt.get_result()
+    times_ms = times_s * data['dt_ms']
+    err = velocity_errors(times_ms, vels, data['t_grid'], data['v_rms'])
+    ok  = count_correct_picks(times_ms, vels, data['t_grid'], data['v_rms'], tol=tol)
+
+    record = {
+        'run':          int(run_index),
+        'seed':         int(seed),
+        'best_score':   float(opt.best_score),
+        'rmse':         err['rmse'],
+        'mae':          err['mae'],
+        'mape':         err['mape'],
+        'n_correct':    ok['n_correct'],
+        'frac_correct': ok['frac_correct'],
+        'exec_time_s':  float(opt.exec_time_s),
+        'n_evals':      int(opt.n_evals),
+        'picks_time_ms': [float(t) for t in times_ms],
+        'picks_vel_ms':  [float(v) for v in vels],
+        'v_true':        err['v_true'],
+        'errors':        err['errors'],
+        'correct':       ok['correct'],
+        'eval_history':  [[int(e), float(s)] for e, s in opt.eval_history],
+    }
+    # Algorithm-specific extras (present only in some optimizers)
+    if hasattr(opt, 'restart_scores'):
+        record['restart_scores'] = [float(s) for s in opt.restart_scores]
+        record['restart_iters']  = [len(h) - 1 for h in opt.restart_histories]
+    return record
+
+
+def summarize_runs(runs):
+    """Statistics over the runs of one experiment (summary.json)."""
+    return {key: summarize([r[key] for r in runs]) for key in SUMMARY_KEYS}
+
+
+def run_seeds(master_seed, n_runs):
+    """Independent, reproducible run seeds derived from the master seed."""
+    return [int(s) for s in np.random.SeedSequence(master_seed).generate_state(n_runs)]
+
+
+# ------------------------------------------------------------------ #
 # Main                                                                 #
 # ------------------------------------------------------------------ #
 
@@ -181,48 +240,18 @@ def main():
     print(f"Experiment : {cfg['name']}")
     print(f"Output     : {out_dir}")
     data = build_gather(cfg)
-    gather, offsets = data['gather'], data['offsets']
-    t_grid, v_rms, dt_ms = data['t_grid'], data['v_rms'], data['dt_ms']
+    gather = data['gather']
     params = resolve_params(opt_cfg['params'], data)
     source = cfg['model'].get('path', f"data_seed={exp.get('data_seed')}")
     print(f"Gather     : {gather.shape}, {source}")
 
-    run_seeds = np.random.SeedSequence(exp['master_seed']).generate_state(exp['n_runs'])
+    seeds = run_seeds(exp['master_seed'], exp['n_runs'])
 
     runs = []
     t_all = time.perf_counter()
-    for i, seed in enumerate(run_seeds):
-        opt = opt_cls(gather, offsets, dt_ms, seed=int(seed), **params)
-        opt.run()
-
-        times_s, vels = opt.get_result()
-        times_ms = times_s * dt_ms
-        err = velocity_errors(times_ms, vels, t_grid, v_rms)
-        ok  = count_correct_picks(times_ms, vels, t_grid, v_rms,
-                                  tol=exp.get('correct_tol', 0.02))
-
-        record = {
-            'run':         i,
-            'seed':        int(seed),
-            'best_score':  float(opt.best_score),
-            'rmse':        err['rmse'],
-            'mae':         err['mae'],
-            'mape':        err['mape'],
-            'n_correct':   ok['n_correct'],
-            'frac_correct': ok['frac_correct'],
-            'exec_time_s': float(opt.exec_time_s),
-            'n_evals':     int(opt.n_evals),
-            'picks_time_ms':  [float(t) for t in times_ms],
-            'picks_vel_ms':   [float(v) for v in vels],
-            'v_true':         err['v_true'],
-            'errors':         err['errors'],
-            'correct':        ok['correct'],
-            'eval_history':   [[int(e), float(s)] for e, s in opt.eval_history],
-        }
-        # Algorithm-specific extras (present only in some optimizers)
-        if hasattr(opt, 'restart_scores'):
-            record['restart_scores'] = [float(s) for s in opt.restart_scores]
-            record['restart_iters']  = [len(h) - 1 for h in opt.restart_histories]
+    for i, seed in enumerate(seeds):
+        record = run_single(opt_cls, params, data, seed, i,
+                            tol=exp.get('correct_tol', 0.02))
         runs.append(record)
 
         print(f"  run {i + 1:3d}/{exp['n_runs']}  seed={int(seed):10d}  "
@@ -234,11 +263,7 @@ def main():
         with open(os.path.join(out_dir, 'runs.json'), 'w') as f:
             json.dump(runs, f, indent=2)
 
-    summary = {
-        key: summarize([r[key] for r in runs])
-        for key in ('best_score', 'n_correct', 'rmse', 'mae', 'mape',
-                    'exec_time_s', 'n_evals')
-    }
+    summary = summarize_runs(runs)
     summary['total_time_s'] = time.perf_counter() - t_all
     with open(os.path.join(out_dir, 'summary.json'), 'w') as f:
         json.dump(summary, f, indent=2)

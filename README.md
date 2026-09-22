@@ -58,6 +58,15 @@ python scripts/compare_experiments.py results/experiments/hill_climbing_cdp6800_
 Each run also reports `n_correct`: picks whose velocity is within 2% of the
 true RMS velocity (`experiment.correct_tol`).
 
+**All test cases at once** (every algorithm in the batch config, same seeds,
+comparison per case and over all cases; `--workers` runs in parallel with
+identical results, `--resume` continues an interrupted batch):
+```bash
+python scripts/run_batch.py configs/batch_t1_all_cases.json --workers 4
+```
+Results: `results/experiments/<name>_<date>/batch_summary.md`, plus one
+folder per case and algorithm in the same format as `run_experiment.py`.
+
 **Formulations:** v1 only requires distinct pick times. v2 adds a minimum
 separation between picks (`min_sep_ms`) and an allowed time window
 (`t_min_ms`, `t_max_ms`), which excludes the water layer and the end of
