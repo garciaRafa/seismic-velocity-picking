@@ -7,6 +7,27 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## Quick start (test cases and interface)
+The test case bank is in `cases/` (one `.npz` file per case, described in
+`cases/README.md`). Running the algorithms only needs Python + NumPy.
+```bash
+python run.py                    # menus: choose a case, an algorithm and a seed
+python run.py --list             # list the test cases
+python run.py --case marmousi2_cdp06800 --algorithm HillClimbing --seed 42
+python run.py --verify results/reports/<file>.json   # recompute a saved solution's value
+```
+Each run prints a report (best solution: time and velocity of every pick,
+its objective value, accuracy against the true RMS velocity, cost) and
+saves it in `results/reports/` as `.txt` and `.json`. Default parameters
+are in `configs/interface_defaults.json`.
+
+To regenerate the cases (needs the Marmousi2 model in `data/models/marmousi2/`):
+```bash
+python scripts/generate_cases.py
+```
+Experiments can also read a saved case: `"model": {"source": "case", "path": "cases/<name>.npz"}`,
+and `"t_min_ms": "auto"` sets the earliest pick time to the case's water bottom.
+
 ## Tests
 ```bash
 pip install pytest
