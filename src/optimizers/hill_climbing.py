@@ -39,17 +39,27 @@ class HillClimbing(BaseOptimizer):
     restarts    : int   — number of random restarts
     patience    : int   — iterations without improvement before a
                           restart is considered stuck in a local optimum
+    max_evals   : int or None — budget of objective evaluations for the
+                          whole run (all restarts). None = no budget.
+
+    Reproducibility
+    ---------------
+    Each restart gets its own random generator, derived from `seed` with
+    np.random.SeedSequence(seed).spawn(restarts). The streams of different
+    restarts (and of runs with different seeds) are statistically
+    independent, unlike consecutive seeds such as seed + restart.
     """
 
     def __init__(self, traces, offsets, dt_ms,
                  vel_min=1400.0, vel_max=3000.0,
                  n_picks=10, max_iter=200, seed=42,
                  step_time=5, step_vel=50.0,
-                 n_neighbors=20, restarts=5, patience=20):
+                 n_neighbors=20, restarts=5, patience=20,
+                 max_evals=None):
 
         super().__init__(traces, offsets, dt_ms,
                          vel_min, vel_max,
-                         n_picks, max_iter, seed)
+                         n_picks, max_iter, seed, max_evals)
 
         self.step_time   = step_time
         self.step_vel    = step_vel
@@ -73,11 +83,7 @@ class HillClimbing(BaseOptimizer):
         """Start from a random valid solution."""
         self._current_picks = self._random_picks()
         self._current_score = self._evaluate(self._current_picks)
-
-        # Update global best
-        if self._current_score > self.best_score:
-            self.best_score = self._current_score
-            self.best_picks = list(self._current_picks)
+        self._update_best(self._current_picks, self._current_score)
 
     def _iterate(self):
         """
@@ -88,6 +94,9 @@ class HillClimbing(BaseOptimizer):
         best_neighbor_score = self._current_score
 
         for _ in range(self.n_neighbors):
+            if self.budget_exhausted:
+                break
+
             neighbor = self._generate_neighbor(self._current_picks)
 
             if not self._is_valid(neighbor):
@@ -103,10 +112,7 @@ class HillClimbing(BaseOptimizer):
         if improved:
             self._current_picks = best_neighbor
             self._current_score = best_neighbor_score
-
-            if self._current_score > self.best_score:
-                self.best_score = self._current_score
-                self.best_picks = list(self._current_picks)
+            self._update_best(self._current_picks, self._current_score)
 
     # ------------------------------------------------------------------ #
     # Neighbor generation                                                  #
@@ -120,16 +126,16 @@ class HillClimbing(BaseOptimizer):
         matches temporal order.
         """
         neighbor = list(picks)
-        idx      = np.random.randint(0, self.n_picks)
+        idx      = int(self.rng.integers(0, self.n_picks))
 
         t, v = neighbor[idx]
 
         # Perturb time
-        dt = np.random.randint(-self.step_time, self.step_time + 1)
+        dt = int(self.rng.integers(-self.step_time, self.step_time + 1))
         t_new = int(np.clip(t + dt, 0, self.n_samples - 1))
 
         # Perturb velocity
-        dv = np.random.uniform(-self.step_vel, self.step_vel)
+        dv = float(self.rng.uniform(-self.step_vel, self.step_vel))
         v_new = float(np.clip(v + dv, self.vel_min, self.vel_max))
 
         neighbor[idx] = (t_new, v_new)
@@ -155,12 +161,18 @@ class HillClimbing(BaseOptimizer):
         import time
         t_start = time.perf_counter()
 
-        self.history           = []
+        self._reset_run_state()
         self.restart_histories = []
         self.restart_scores    = []
 
-        for restart in range(self.restarts):
-            np.random.seed(self.seed + restart)
+        # One independent random generator per restart
+        restart_seeds = np.random.SeedSequence(self.seed).spawn(self.restarts)
+
+        for restart, restart_seed in enumerate(restart_seeds):
+            if self.budget_exhausted:
+                break
+
+            self.rng = np.random.default_rng(restart_seed)
 
             self._initialize()
 
@@ -168,6 +180,9 @@ class HillClimbing(BaseOptimizer):
             stagnant        = 0
 
             for it in range(self.max_iter):
+                if self.budget_exhausted:
+                    break
+
                 prev_score = self._current_score
                 self._iterate()
 

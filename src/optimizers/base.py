@@ -28,11 +28,21 @@ class BaseOptimizer(ABC):
     n_picks    : int   — number of velocity picks to find
     max_iter   : int   — maximum number of iterations
     seed       : int   — random seed for reproducibility
+    max_evals  : int or None — budget of objective evaluations (one
+                 evaluation = one full solution). None means no budget.
+
+    Randomness
+    ----------
+    Every optimizer draws random numbers ONLY from its own generator,
+    self.rng (numpy Generator). The global np.random state is never used,
+    so other code (notebook cells, data generation, other optimizers)
+    cannot change the sequence of draws, and the same seed always
+    reproduces the same run.
     """
 
     def __init__(self, traces, offsets, dt_ms,
                  vel_min=1500.0, vel_max=5000.0,
-                 n_picks=10, max_iter=200, seed=42):
+                 n_picks=10, max_iter=200, seed=42, max_evals=None):
 
         self.traces   = traces
         self.offsets  = offsets
@@ -40,18 +50,26 @@ class BaseOptimizer(ABC):
         self.vel_min  = vel_min
         self.vel_max  = vel_max
         self.n_picks  = n_picks
-        self.max_iter = max_iter
-        self.seed     = seed
+        self.max_iter  = max_iter
+        self.seed      = seed
+        self.max_evals = max_evals
 
         self.n_traces, self.n_samples = traces.shape
 
+        # Own random generator (see "Randomness" above)
+        self.rng = np.random.default_rng(seed)
+
         # Results — filled after run()
+        self._reset_run_state()
+
+    def _reset_run_state(self):
+        """Clear results and counters before a new run."""
         self.history       = []   # best fitness per iteration
+        self.eval_history  = []   # (n_evals, best_score) at each improvement
         self.best_picks    = None # list of (time_sample, velocity)
         self.best_score    = -np.inf
         self.exec_time_s   = None
-
-        np.random.seed(seed)
+        self.n_evals       = 0    # objective evaluations performed
 
     # ------------------------------------------------------------------ #
     # Abstract methods — must be implemented by each algorithm            #
@@ -84,9 +102,25 @@ class BaseOptimizer(ABC):
         score : float in [0, 1]
         """
         from src.seismic.semblance import picking_objective
+        self.n_evals += 1
         return picking_objective(
             self.traces, self.offsets, picks, self.dt_ms
         )
+
+    @property
+    def budget_exhausted(self):
+        """True when the evaluation budget (max_evals) has been used up."""
+        return self.max_evals is not None and self.n_evals >= self.max_evals
+
+    def _update_best(self, picks, score):
+        """
+        Keep the global best solution and record when it improved,
+        measured in number of evaluations (for fair comparisons).
+        """
+        if score > self.best_score:
+            self.best_score = score
+            self.best_picks = list(picks)
+            self.eval_history.append((self.n_evals, score))
 
     def _is_valid(self, picks):
         """
@@ -121,10 +155,10 @@ class BaseOptimizer(ABC):
 
     def _random_picks(self):
         """Generate a random valid set of picks."""
-        times = sorted(np.random.choice(
+        times = sorted(int(t) for t in self.rng.choice(
             self.n_samples, self.n_picks, replace=False
         ))
-        vels = sorted(np.random.uniform(
+        vels = sorted(float(v) for v in self.rng.uniform(
             self.vel_min, self.vel_max, self.n_picks
         ))
         return list(zip(times, vels))
@@ -142,11 +176,14 @@ class BaseOptimizer(ABC):
             optimizer.run()
             times, vels = optimizer.get_result()
         """
+        self._reset_run_state()
         self._initialize()
 
         t_start = time.perf_counter()
 
         for it in range(self.max_iter):
+            if self.budget_exhausted:
+                break
             self._iterate()
 
             if self.best_score not in self.history or \
@@ -196,6 +233,7 @@ class BaseOptimizer(ABC):
             'best_score':  self.best_score,
             'exec_time_s': self.exec_time_s,
             'n_iter':      len(self.history),
+            'n_evals':     self.n_evals,
             'seed':        self.seed,
         }
 
