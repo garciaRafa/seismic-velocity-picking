@@ -127,9 +127,85 @@ def load_bin(path, n1, n2, dtype=np.float32,
     return data, info
 
 
+def load_segy_velocity_model(path, n1=2801, spacing_m=1.25, verbose=True):
+    """
+    Load a Marmousi2-style velocity model stored as SEG-Y, one trace per
+    horizontal position (no real acquisition geometry — each trace IS a
+    depth column, exactly like the rows of the .bin file).
+
+    Parameters
+    ----------
+    path      : str   — path to the .segy file
+    n1        : int   — expected number of vertical (depth) samples;
+                        used only to sanity-check the file, since the
+                        SEG-Y binary header already carries this
+    spacing_m : float — spatial sampling in meters (default 1.25,
+                        SEG-Y stores no spatial unit for this axis)
+    verbose   : bool  — print file info
+
+    Returns
+    -------
+    data : np.ndarray, shape (n_traces, n_samples), float32
+           axis 0 = horizontal distance, axis 1 = vertical depth
+           (same convention as load_bin)
+    info : dict with metadata
+    """
+    import segyio
+
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"SEG-Y file not found: {path}")
+
+    with segyio.open(path, ignore_geometry=True) as f:
+        n_traces  = f.tracecount
+        n_samples = len(f.samples)
+
+        data = np.zeros((n_traces, n_samples), dtype=np.float32)
+        for i in range(n_traces):
+            data[i] = f.trace[i]
+
+    if n1 is not None and n_samples != n1:
+        # Not fatal — the file may simply use a different depth sampling.
+        # Only warn, since n1 here is just an expectation from the known
+        # .bin layout (2801 samples at 1.25 m).
+        if verbose:
+            print(f"  Note: {n_samples} depth samples found, expected {n1}.")
+
+    info = {
+        'n1':         n_samples,
+        'n2':         n_traces,
+        'n_vertical':   n_samples,
+        'n_horizontal': n_traces,
+        'spacing_m':  spacing_m,
+        'x_max_km':   n_traces * spacing_m / 1000.0,
+        'z_max_km':   n_samples * spacing_m / 1000.0,
+        'val_min':    float(data.min()),
+        'val_max':    float(data.max()),
+        'val_mean':   float(data.mean()),
+        'path':       path,
+        'format':     'segy',
+    }
+
+    if verbose:
+        print(f"Loaded : {os.path.basename(path)}")
+        print(f"  Shape    : {data.shape}  (n_traces x n_samples)")
+        print(f"  X extent : {info['x_max_km']:.2f} km")
+        print(f"  Z extent : {info['z_max_km']:.2f} km")
+        print(f"  Min      : {info['val_min']:.1f}")
+        print(f"  Max      : {info['val_max']:.1f}")
+        print(f"  Mean     : {info['val_mean']:.1f}")
+
+    return data, info
+
+
 def load_marmousi2_velocity(models_dir, verbose=True):
     """
     Convenience function to load the Marmousi2 P-wave velocity model.
+
+    Looks for a .segy file first (MODEL_P-WAVE_VELOCITY_1.25m.segy), and
+    falls back to the raw binary (MODEL_P-WAVE_VELOCITY_1.25m.bin) if no
+    .segy is present. Both return the exact same array layout, so callers
+    (e.g. src.seismic.cases.build_velocity_profile) don't need to know
+    which format is actually on disk.
 
     Parameters
     ----------
@@ -141,10 +217,15 @@ def load_marmousi2_velocity(models_dir, verbose=True):
     vel  : np.ndarray, shape (13601, 2801), float32  — velocity in m/s
     info : dict with metadata
     """
-    path = os.path.join(models_dir, 'MODEL_P-WAVE_VELOCITY_1.25m.bin')
+    segy_path = os.path.join(models_dir, 'MODEL_P-WAVE_VELOCITY_1.25m.segy')
+    bin_path  = os.path.join(models_dir, 'MODEL_P-WAVE_VELOCITY_1.25m.bin')
+
+    if os.path.exists(segy_path):
+        return load_segy_velocity_model(segy_path, n1=2801,
+                                        spacing_m=1.25, verbose=verbose)
 
     return load_bin(
-        path,
+        bin_path,
         n1=2801,
         n2=13601,
         dtype=np.float32,
