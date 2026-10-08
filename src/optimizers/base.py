@@ -145,6 +145,46 @@ class BaseOptimizer(ABC):
         """True when the evaluation budget (max_evals) has been used up."""
         return self.max_evals is not None and self.n_evals >= self.max_evals
 
+    def _generate_neighbor(self, picks, step_time, step_vel):
+        """
+        Perturb one randomly chosen pick: a small random change in time
+        and/or velocity. The neighbor is kept sorted by time, so list
+        order always matches temporal order.
+
+        Shared by every local-search algorithm (Hill Climbing, Tabu
+        Search, ...) so they all explore literally the same
+        neighborhood structure — any difference in their results comes
+        from the search STRATEGY, not from the move set.
+
+        Parameters
+        ----------
+        picks     : list of (time_sample, velocity) — current solution
+        step_time : int   — max perturbation in time samples
+        step_vel  : float — max perturbation in velocity (m/s)
+
+        Returns
+        -------
+        neighbor : list of (time_sample, velocity) — the perturbed solution
+        idx      : int — index of the perturbed pick in the INPUT list
+                   (before the re-sort)
+        t_old    : int — the pick's time sample before the perturbation
+        t_new    : int — the pick's time sample after the perturbation
+        """
+        neighbor = list(picks)
+        idx      = int(self.rng.integers(0, self.n_picks))
+
+        t_old, v_old = neighbor[idx]
+
+        dt    = int(self.rng.integers(-step_time, step_time + 1))
+        t_new = int(np.clip(t_old + dt, self.t_min, self.t_max))
+
+        dv    = float(self.rng.uniform(-step_vel, step_vel))
+        v_new = float(np.clip(v_old + dv, self.vel_min, self.vel_max))
+
+        neighbor[idx] = (t_new, v_new)
+        neighbor.sort(key=lambda p: p[0])
+        return neighbor, idx, t_old, t_new
+
     def _update_best(self, picks, score):
         """
         Keep the global best solution and record when it improved,

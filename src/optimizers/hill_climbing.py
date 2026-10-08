@@ -101,7 +101,9 @@ class HillClimbing(BaseOptimizer):
             if self.budget_exhausted:
                 break
 
-            neighbor = self._generate_neighbor(self._current_picks)
+            neighbor, _, _, _ = self._generate_neighbor(
+                self._current_picks, self.step_time, self.step_vel
+            )
 
             if not self._is_valid(neighbor):
                 continue
@@ -117,34 +119,6 @@ class HillClimbing(BaseOptimizer):
             self._current_picks = best_neighbor
             self._current_score = best_neighbor_score
             self._update_best(self._current_picks, self._current_score)
-
-    # ------------------------------------------------------------------ #
-    # Neighbor generation                                                  #
-    # ------------------------------------------------------------------ #
-
-    def _generate_neighbor(self, picks):
-        """
-        Generate a neighbor by perturbing one randomly chosen pick.
-        Perturbation is a small random change in time and/or velocity.
-        The neighbor is kept sorted by time, so list order always
-        matches temporal order.
-        """
-        neighbor = list(picks)
-        idx      = int(self.rng.integers(0, self.n_picks))
-
-        t, v = neighbor[idx]
-
-        # Perturb time
-        dt = int(self.rng.integers(-self.step_time, self.step_time + 1))
-        t_new = int(np.clip(t + dt, self.t_min, self.t_max))
-
-        # Perturb velocity
-        dv = float(self.rng.uniform(-self.step_vel, self.step_vel))
-        v_new = float(np.clip(v + dv, self.vel_min, self.vel_max))
-
-        neighbor[idx] = (t_new, v_new)
-        neighbor.sort(key=lambda p: p[0])
-        return neighbor
 
     # ------------------------------------------------------------------ #
     # Run with restarts                                                    #
