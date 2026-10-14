@@ -69,3 +69,68 @@ def count_correct_picks(times_ms, vels, t_grid, v_rms_true, tol=0.02):
         'frac_correct': float(correct.mean()),
         'correct':      [bool(c) for c in correct],
     }
+
+
+def precision_recall(times_ms, vels, t_grid, v_rms_true, event_times_ms,
+                     tol=0.02, time_tol_ms=40.0):
+    """
+    Detection scores for a variable number of picks (formulation v3).
+
+    A pick MATCHES an event when it is within `time_tol_ms` of the event
+    time AND its velocity is correct (|picked - true| <= tol * true at
+    the pick time). With time_tol_ms below half the minimum separation
+    between picks (and between events), each pick can match at most one
+    event and each event at most one pick.
+
+        precision = matched picks / picks    (how many picks are real)
+        recall    = matched events / events  (how many events were found)
+        f1        = harmonic mean of precision and recall
+
+    Parameters
+    ----------
+    times_ms, vels       : picks (ms, m/s)
+    t_grid, v_rms_true   : true RMS velocity on its time axis
+    event_times_ms       : times of the reference events, e.g. the
+                           natural events of src.analysis.events
+                           (ground truth — evaluation only)
+    tol                  : relative velocity tolerance (default 2%)
+    time_tol_ms          : time tolerance between a pick and an event
+
+    Returns
+    -------
+    dict with n_picks, n_events, n_vel_correct (picks with a correct
+    velocity, wherever they are), n_matched_picks, n_found_events,
+    precision, recall, f1, matched (bool per pick), found (bool per event)
+    """
+    times_ms = np.asarray(times_ms, dtype=float)
+    vels     = np.asarray(vels, dtype=float)
+    events   = np.asarray(event_times_ms, dtype=float)
+
+    v_true   = np.interp(times_ms, t_grid, v_rms_true)
+    vel_ok   = np.abs(vels - v_true) <= tol * v_true
+
+    if times_ms.size and events.size:
+        close = np.abs(times_ms[:, None] - events[None, :]) <= time_tol_ms
+        hit   = close & vel_ok[:, None]                # (picks, events)
+    else:
+        hit = np.zeros((times_ms.size, events.size), dtype=bool)
+
+    matched = hit.any(axis=1)
+    found   = hit.any(axis=0)
+    precision = float(matched.mean()) if times_ms.size else 0.0
+    recall    = float(found.mean()) if events.size else 0.0
+    f1 = (2 * precision * recall / (precision + recall)
+          if precision + recall > 0 else 0.0)
+
+    return {
+        'n_picks':          int(times_ms.size),
+        'n_events':         int(events.size),
+        'n_vel_correct':    int(vel_ok.sum()),
+        'n_matched_picks':  int(matched.sum()),
+        'n_found_events':   int(found.sum()),
+        'precision':        precision,
+        'recall':           recall,
+        'f1':               float(f1),
+        'matched':          [bool(m) for m in matched],
+        'found':            [bool(f) for f in found],
+    }

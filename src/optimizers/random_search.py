@@ -26,12 +26,16 @@ class RandomSearch(BaseOptimizer):
     min_sep_ms, t_min_ms, t_max_ms : see BaseOptimizer
     max_evals : int — number of random solutions to evaluate (required;
                 it is the only stopping criterion of the method)
+    objective, tau, k_min, k_max : formulation v3 (see BaseOptimizer).
+                With objective='threshold' each random solution also has a
+                random number of picks.
     """
 
     def __init__(self, traces, offsets, dt_ms,
                  vel_min=1400.0, vel_max=3000.0,
                  n_picks=10, seed=42, max_evals=None,
-                 min_sep_ms=0.0, t_min_ms=0.0, t_max_ms=None):
+                 min_sep_ms=0.0, t_min_ms=0.0, t_max_ms=None,
+                 **formulation):
 
         if max_evals is None or max_evals < 1:
             raise ValueError("RandomSearch needs a positive max_evals budget.")
@@ -40,7 +44,7 @@ class RandomSearch(BaseOptimizer):
         super().__init__(traces, offsets, dt_ms,
                          vel_min, vel_max,
                          n_picks, max_evals, seed, max_evals,
-                         min_sep_ms, t_min_ms, t_max_ms)
+                         min_sep_ms, t_min_ms, t_max_ms, **formulation)
 
     def _initialize(self):
         """Evaluate the first random solution."""

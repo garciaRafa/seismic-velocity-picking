@@ -54,6 +54,23 @@ either one. Early stopping instead tracks stagnation of the GLOBAL
 best score directly (`patience` iterations without improvement),
 rather than per-restart stagnation as in HillClimbing.
 
+Formulation v3 (variable number of picks)
+------------------------------------------
+With objective='threshold', neighbors can also insert or remove a pick
+(BaseOptimizer._structural_move). Positions in the list are then no
+longer stable (an insertion shifts every later index), so the tabu
+attributes identify picks by TIME instead of (index, time):
+
+    ('place',  t)  — set when a move VACATES time t (shift, jump, remove);
+                     forbids putting a pick back at t
+    ('remove', t)  — set when a pick is INSERTED at t; forbids removing
+                     it right away
+
+Each one forbids exactly the reversal of the move just taken (shift
+back, re-insert what was removed, remove what was inserted). With the
+default 'mean' objective the original (index, time) attributes are
+used and the search is unchanged.
+
 Diversification: jump move
 ---------------------------
 The first runs on Marmousi2 showed groups of picks stuck on flat,
@@ -108,6 +125,9 @@ class TabuSearch(BaseOptimizer):
                           no budget.
     min_sep_ms, t_min_ms, t_max_ms : time constraints of the formulation
                           (see BaseOptimizer). Defaults = formulation v1.
+    objective, tau, k_min, k_max, p_insert, p_remove : formulation v3
+                          (variable number of picks), see BaseOptimizer.
+                          Default objective='mean' = formulations v1/v2.
 
     Diagnostics filled by run()
     ---------------------------
@@ -115,6 +135,8 @@ class TabuSearch(BaseOptimizer):
     active_tabu_size   : tabu attributes still forbidden at the end
     n_tabu_attributes  : distinct (pick, time) attributes ever made tabu
     jump_stats         : {'proposed', 'accepted'} counts of jump moves
+    move_stats         : accepted moves per kind: 'shift', 'jump',
+                         'insert', 'remove'
     """
 
     def __init__(self, traces, offsets, dt_ms,
@@ -123,12 +145,12 @@ class TabuSearch(BaseOptimizer):
                  step_time=5, step_vel=50.0, n_neighbors=30,
                  tabu_tenure=15, patience=60, p_jump=0.0,
                  max_evals=None, min_sep_ms=0.0, t_min_ms=0.0,
-                 t_max_ms=None):
+                 t_max_ms=None, **formulation):
 
         super().__init__(traces, offsets, dt_ms,
                          vel_min, vel_max,
                          n_picks, max_iter, seed, max_evals,
-                         min_sep_ms, t_min_ms, t_max_ms)
+                         min_sep_ms, t_min_ms, t_max_ms, **formulation)
 
         if not 0.0 <= p_jump <= 1.0:
             raise ValueError("p_jump must be in [0, 1].")
@@ -150,6 +172,11 @@ class TabuSearch(BaseOptimizer):
         # Diagnostics — filled by run()
         self.stop_reason = None
         self.jump_stats  = {'proposed': 0, 'accepted': 0}
+        self.move_stats  = self._empty_move_stats()
+
+    @staticmethod
+    def _empty_move_stats():
+        return {'shift': 0, 'jump': 0, 'insert': 0, 'remove': 0}
 
     @property
     def active_tabu_size(self):
@@ -176,9 +203,9 @@ class TabuSearch(BaseOptimizer):
         (neighbor, idx, t_old, t_new).
         """
         neighbor = list(picks)
-        idx      = int(self.rng.integers(0, self.n_picks))
+        idx      = int(self.rng.integers(0, len(picks)))
         t_old, _ = neighbor[idx]
-        last     = self.n_picks - 1
+        last     = len(picks) - 1
 
         t_lo = self.t_min if idx == 0 else neighbor[idx - 1][0] + self.min_sep
         t_hi = self.t_max if idx == last else neighbor[idx + 1][0] - self.min_sep
@@ -195,6 +222,45 @@ class TabuSearch(BaseOptimizer):
     # Abstract method implementations                                      #
     # ------------------------------------------------------------------ #
 
+    def _propose(self):
+        """
+        Generate one neighbor of the current solution and the two tabu
+        attributes of its move.
+
+        Returns
+        -------
+        neighbor : list of (time_sample, velocity)
+        kind     : 'shift', 'jump', 'insert' or 'remove'
+        check    : attribute that makes THIS move tabu, if active
+        mark     : attribute to make tabu if this move is taken (it
+                   forbids the reversal of the move)
+        """
+        current = self._current_picks
+
+        # v3 only: insert/remove one pick. In v1/v2 this returns None
+        # without drawing a random number.
+        move = self._structural_move(current)
+        if move is not None:
+            neighbor, kind, t_old, t_new = move
+            if kind == 'insert':
+                return neighbor, kind, ('place', t_new), ('remove', t_new)
+            return neighbor, kind, ('remove', t_old), ('place', t_old)
+
+        # With p_jump = 0 no extra random number is drawn, so the plain
+        # Tabu Search is reproduced exactly.
+        is_jump = self.p_jump > 0 and self.rng.random() < self.p_jump
+        if is_jump:
+            neighbor, idx, t_old, t_new = self._jump_neighbor(current)
+            self.jump_stats['proposed'] += 1
+        else:
+            neighbor, idx, t_old, t_new = self._generate_neighbor(
+                current, self.step_time, self.step_vel)
+        kind = 'jump' if is_jump else 'shift'
+
+        if self.variable_k:
+            return neighbor, kind, ('place', t_new), ('place', t_old)
+        return neighbor, kind, (idx, t_new), (idx, t_old)
+
     def _initialize(self):
         """Start from a random valid solution. Empty tabu list."""
         self._current_picks = self._random_picks()
@@ -203,6 +269,7 @@ class TabuSearch(BaseOptimizer):
         self._iteration  = 0
         self._no_improve = 0
         self.jump_stats  = {'proposed': 0, 'accepted': 0}
+        self.move_stats  = self._empty_move_stats()
         self._update_best(self._current_picks, self._current_score)
 
     def _iterate(self):
@@ -219,30 +286,18 @@ class TabuSearch(BaseOptimizer):
 
         best_neighbor       = None
         best_neighbor_score = -np.inf
-        best_move           = None   # (idx, t_old): what becomes tabu
-        best_is_jump        = False
+        best_mark           = None   # tabu attribute set if this move is taken
+        best_kind           = None
 
         for _ in range(self.n_neighbors):
             if self.budget_exhausted:
                 break
 
-            # With p_jump = 0 no extra random number is drawn, so the
-            # plain Tabu Search is reproduced exactly.
-            is_jump = self.p_jump > 0 and self.rng.random() < self.p_jump
-
-            if is_jump:
-                neighbor, idx, t_old, t_new = self._jump_neighbor(
-                    self._current_picks)
-                self.jump_stats['proposed'] += 1
-            else:
-                neighbor, idx, t_old, t_new = self._generate_neighbor(
-                    self._current_picks, self.step_time, self.step_vel
-                )
+            neighbor, kind, check, mark = self._propose()
             if not self._is_valid(neighbor):
                 continue
 
-            move    = (idx, t_new)
-            is_tabu = move in self._tabu and self._tabu[move] > self._iteration
+            is_tabu = check in self._tabu and self._tabu[check] > self._iteration
 
             score   = self._evaluate(neighbor)
             aspired = score > self.best_score
@@ -253,15 +308,16 @@ class TabuSearch(BaseOptimizer):
             if score > best_neighbor_score:
                 best_neighbor_score = score
                 best_neighbor       = neighbor
-                best_move           = (idx, t_old)
-                best_is_jump        = is_jump
+                best_mark           = mark
+                best_kind           = kind
 
         if best_neighbor is not None:
             self._current_picks = best_neighbor
             self._current_score = best_neighbor_score
-            self._tabu[best_move] = self._iteration + self.tabu_tenure
+            self._tabu[best_mark] = self._iteration + self.tabu_tenure
             self._update_best(self._current_picks, self._current_score)
-            if best_is_jump:
+            self.move_stats[best_kind] += 1
+            if best_kind == 'jump':
                 self.jump_stats['accepted'] += 1
 
         # Early-stop bookkeeping tracks the GLOBAL best (there is no

@@ -271,3 +271,33 @@ def robust_threshold(panel, factor=10.0):
     med = np.median(values)
     sigma_rob = 1.4826 * np.median(np.abs(values - med))
     return float(med + factor * sigma_rob)
+
+
+def picking_objective_threshold(traces, offsets, picks, dt_ms, tau,
+                                t0_ms=0.0, window=DEFAULT_WINDOW):
+    """
+    Objective of formulation v3 (variable number of picks):
+
+        f = sum_k ( S(t_k, v_k) - tau )
+
+    Each pick adds its semblance minus a fixed cost tau, so a pick only
+    improves the solution when its semblance is above the threshold.
+    Equivalently f = sum_k S_k - tau * K: total semblance with a penalty
+    proportional to the number of picks K (a cardinality penalty).
+
+    Parameters
+    ----------
+    traces, offsets, dt_ms, t0_ms, window : as in picking_objective()
+    picks : list of (time_sample, velocity) — any number of picks (an
+            empty list gives 0)
+    tau   : float — threshold, e.g. from robust_threshold()
+
+    Returns
+    -------
+    score : float — higher is better; not bounded to [0, 1]
+    """
+    return float(sum(
+        semblance_at_pick(traces, offsets, velocity, int(time_sample),
+                          dt_ms, t0_ms, window) - tau
+        for time_sample, velocity in picks
+    ))

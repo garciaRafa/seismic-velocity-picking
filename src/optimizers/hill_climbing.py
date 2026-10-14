@@ -43,6 +43,9 @@ class HillClimbing(BaseOptimizer):
                           whole run (all restarts). None = no budget.
     min_sep_ms, t_min_ms, t_max_ms : time constraints of the formulation
                           (see BaseOptimizer). Defaults = formulation v1.
+    objective, tau, k_min, k_max, p_insert, p_remove : formulation v3
+                          (variable number of picks), see BaseOptimizer.
+                          Default objective='mean' = formulations v1/v2.
 
     Reproducibility
     ---------------
@@ -58,12 +61,12 @@ class HillClimbing(BaseOptimizer):
                  step_time=5, step_vel=50.0,
                  n_neighbors=20, restarts=5, patience=20,
                  max_evals=None, min_sep_ms=0.0, t_min_ms=0.0,
-                 t_max_ms=None):
+                 t_max_ms=None, **formulation):
 
         super().__init__(traces, offsets, dt_ms,
                          vel_min, vel_max,
                          n_picks, max_iter, seed, max_evals,
-                         min_sep_ms, t_min_ms, t_max_ms)
+                         min_sep_ms, t_min_ms, t_max_ms, **formulation)
 
         self.step_time   = step_time
         self.step_vel    = step_vel
@@ -101,9 +104,15 @@ class HillClimbing(BaseOptimizer):
             if self.budget_exhausted:
                 break
 
-            neighbor, _, _, _ = self._generate_neighbor(
-                self._current_picks, self.step_time, self.step_vel
-            )
+            # v3: sometimes insert/remove a pick; otherwise (and always
+            # in v1/v2, with no extra random draw) shift one pick
+            move = self._structural_move(self._current_picks)
+            if move is not None:
+                neighbor = move[0]
+            else:
+                neighbor, _, _, _ = self._generate_neighbor(
+                    self._current_picks, self.step_time, self.step_vel
+                )
 
             if not self._is_valid(neighbor):
                 continue
