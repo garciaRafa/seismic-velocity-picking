@@ -208,3 +208,66 @@ def picking_objective(traces, offsets, picks, dt_ms, t0_ms=0.0,
     ]
 
     return float(np.mean(scores))
+
+def semblance_along_curve(traces, offsets, v_curve, dt_ms, t0_ms=0.0,
+                          window=DEFAULT_WINDOW):
+    """
+    Semblance along a velocity function v(t): one value per time sample,
+    S(t_i, v(t_i)), with the same time gate as the objective function.
+
+    Typical use is validation only: evaluated along the TRUE RMS velocity
+    of a synthetic case, it shows which reflections an ideal velocity
+    function would see. It is not used by the optimizers.
+
+    Parameters
+    ----------
+    traces  : np.ndarray, shape (n_traces, n_samples)
+    offsets : np.ndarray, shape (n_traces,)
+    v_curve : np.ndarray, shape (n_samples,) — velocity (m/s) at each sample
+    dt_ms   : float
+    t0_ms   : float
+    window  : int — time gate length in samples
+
+    Returns
+    -------
+    s_curve : np.ndarray, shape (n_samples,), values in [0, 1]
+    """
+    v_curve = np.asarray(v_curve, dtype=np.float64)
+    if v_curve.shape[0] != traces.shape[1]:
+        raise ValueError("v_curve must have one velocity per time sample.")
+    return np.array([
+        semblance_at_pick(traces, offsets, float(v), i, dt_ms, t0_ms, window)
+        for i, v in enumerate(v_curve)
+    ])
+
+
+def robust_threshold(panel, factor=10.0):
+    """
+    Blind semblance threshold, computed from the panel alone (no model or
+    ground-truth information):
+
+        tau = median(panel) + factor * sigma_rob,  sigma_rob = 1.4826 * MAD(panel)
+
+    The semblance ridge (coherent reflections) covers a small fraction of
+    the panel, so the median and the median absolute deviation (MAD)
+    describe the incoherent background, and are barely moved by the ridge.
+    The factor 1.4826 makes sigma_rob match the standard deviation for a
+    normal distribution; semblance is skewed (bounded at 0), so `factor`
+    should be read as "number of robust spreads above the background", not
+    as a Gaussian z-score with a probability attached. (It is called
+    `factor`, not k, to avoid confusion with K, the number of picks.)
+
+    Parameters
+    ----------
+    panel : np.ndarray — semblance values (any shape), e.g. the output of
+            compute_semblance over the velocity range of the formulation
+    factor : float — number of robust spreads above the median
+
+    Returns
+    -------
+    tau : float
+    """
+    values = np.asarray(panel, dtype=np.float64).ravel()
+    med = np.median(values)
+    sigma_rob = 1.4826 * np.median(np.abs(values - med))
+    return float(med + factor * sigma_rob)
