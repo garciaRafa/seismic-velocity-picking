@@ -2,6 +2,7 @@
 data/models/
 data/cdp_gathers/
 data/semblance/
+data/synthetic_fd/
 
 # Generated results
 results/picks/

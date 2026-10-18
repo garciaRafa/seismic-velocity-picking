@@ -1,0 +1,3 @@
+# Extra dependency for generating finite-difference data
+# (scripts/model_fd.py). Not needed to run the algorithms or the tests.
+devito>=4.8
