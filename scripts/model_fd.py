@@ -11,8 +11,9 @@ surface) it:
   3. applies a direct-wave mute and a time gain;
   4. saves the CDP gather as a test case in cases/ (same format as the
      other cases, so every algorithm runs on it unchanged), with the
-     column V_rms as ground truth and the expected primaries and surface
-     multiples in its meta;
+     column V_rms, the expected primaries and surface multiples and their
+     semblance peaks (meta['reference_picks'], the evaluation reference;
+     see scripts/add_reference_picks.py) in its meta;
   5. saves three full shot records (near, middle and far offset shots)
      for display in data/synthetic_fd/ (line_idx selects the receivers of
      the regular line, with uniform spacing).
@@ -49,6 +50,7 @@ from src.seismic.model2d import (build_layered_model, column_event_times,  # noq
 # Imported here (not at the top of generate_cases) to refresh cases/README.md
 sys.path.insert(0, os.path.join(ROOT, 'scripts'))
 from generate_cases import write_readme                                    # noqa: E402
+from add_reference_picks import add_reference                              # noqa: E402
 
 
 def main():
@@ -141,6 +143,7 @@ def main():
             path = os.path.join(ROOT, 'cases', f'{name}.npz')
             save_case(path, processed, offsets, t_out, v_rms, acq['dt_ms'], meta)
             print(f"  saved {os.path.relpath(path, ROOT)}")
+            add_reference(path)        # semblance reference picks -> meta
 
             np.savez_compressed(
                 os.path.join(out_dir, f'{name}_shots.npz'),
