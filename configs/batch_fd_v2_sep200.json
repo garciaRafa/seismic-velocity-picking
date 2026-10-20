@@ -1,0 +1,40 @@
+{
+  "name": "fd_v2_sep200",
+  "cases_dir": "cases",
+  "cases": ["fd_layered_cdp2500_fs", "fd_layered_cdp2500_nofs"],
+  "n_runs": 10,
+  "master_seed": 2026,
+  "correct_tol": 0.02,
+  "formulation": {
+    "vel_min": 1400.0,
+    "vel_max": 3000.0,
+    "n_picks": 4,
+    "min_sep_ms": 200.0,
+    "t_min_ms": "auto",
+    "t_max_ms": 2450.0
+  },
+  "algorithms": {
+    "RandomSearch": {
+      "max_evals": 100000
+    },
+    "HillClimbing": {
+      "max_iter": 10000,
+      "restarts": 1000000,
+      "step_time": 5,
+      "step_vel": 50.0,
+      "n_neighbors": 30,
+      "patience": 60,
+      "max_evals": 100000
+    },
+    "TabuSearch": {
+      "max_iter": 10000,
+      "step_time": 5,
+      "step_vel": 50.0,
+      "n_neighbors": 30,
+      "tabu_tenure": 15,
+      "patience": 10000,
+      "p_jump": 0.1,
+      "max_evals": 100000
+    }
+  }
+}
