@@ -29,13 +29,19 @@ algorithms never see these picks.
 
 import numpy as np
 
-from src.seismic.semblance import compute_semblance
+from src.seismic.semblance import _is_robust, compute_semblance
+
+ROBUST_OPTION_KEYS = ('stretch_mute', 'energy_floor', 'min_fold')
 
 
 def semblance_peak(gather, offsets, dt_ms, t0_ms, v0, time_win_ms=40.0,
-                   vel_win=0.08, vel_step=5.0, t_start_ms=0.0):
+                   vel_win=0.08, vel_step=5.0, t_start_ms=0.0, **semblance_opts):
     """
     Semblance peak of one event near (t0_ms, v0).
+
+    semblance_opts : robust-semblance options (stretch_mute, energy_floor,
+                     min_fold, e_ref), passed to compute_semblance — use the
+                     same ones as the objective being evaluated
 
     Returns
     -------
@@ -48,7 +54,8 @@ def semblance_peak(gather, offsets, dt_ms, t0_ms, v0, time_win_ms=40.0,
     vels = np.arange(v0 * (1 - vel_win), v0 * (1 + vel_win) + vel_step / 2,
                      vel_step, dtype=np.float32)
 
-    panel = np.asarray(compute_semblance(gather, offsets, vels, dt_ms, t_start_ms))
+    panel = np.asarray(compute_semblance(gather, offsets, vels, dt_ms, t_start_ms,
+                                         **semblance_opts))
     box = panel[:, rows].T                     # (time, velocity)
 
     # Interior local maxima (3 x 3 neighborhood)
@@ -76,7 +83,8 @@ def reference_picks(gather, offsets, dt_ms, primaries, multiples=(), **kwargs):
 
     primaries : list of dicts with name, t0_ms, v_rms (case meta)
     multiples : list of dicts with name, t0_ms, v_nmo (case meta)
-    kwargs    : passed to semblance_peak (time_win_ms, vel_win, vel_step)
+    kwargs    : passed to semblance_peak (time_win_ms, vel_win, vel_step and
+                the robust-semblance options)
 
     Returns a list of dicts: name, kind ('primary' / 'multiple'),
     t0_ms and v_model (from the model) and t_ms, v, s, on_edge (peak).
@@ -161,3 +169,33 @@ def match_reference(times_ms, vels, reference, time_tol_ms=40.0, vel_tol=0.02):
         'kind': kind,
         'found': [bool(f) for f in found],
     }
+
+
+def _robust_options(semblance_opts):
+    """Only the robust options that change the semblance, with defaults filled."""
+    opts = {'stretch_mute': None, 'energy_floor': 0.0, 'min_fold': 1}
+    opts.update({k: semblance_opts[k] for k in ROBUST_OPTION_KEYS if k in semblance_opts})
+    return opts
+
+
+def get_reference(case, **semblance_opts):
+    """
+    Reference picks of a case for a given semblance.
+
+    The reference must come from the same semblance the algorithms see:
+    - plain semblance (no robust option on): meta['reference_picks'];
+    - robust semblance: meta['reference_picks_robust'] when it was stored
+      with exactly these options (scripts/add_reference_picks.py), else
+      it is recomputed here (a few seconds).
+
+    case : dict from src.seismic.cases.load_case (needs meta['primaries'])
+    """
+    meta = case['meta']
+    opts = _robust_options(semblance_opts)
+    if not _is_robust(**opts):
+        return meta['reference_picks']
+    if meta.get('reference_picks_robust_options') == opts:
+        return meta['reference_picks_robust']
+    return reference_picks(case['gather'], case['offsets'], case['dt_ms'],
+                           meta['primaries'], meta.get('surface_multiples', []),
+                           **opts)
