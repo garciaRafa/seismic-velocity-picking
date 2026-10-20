@@ -16,6 +16,11 @@ METRICS = {
     'mae':         False,
     'exec_time_s': False,
     'n_evals':     False,
+    # formulation v3 (detection scores; present only in v3 runs)
+    'precision':     True,
+    'recall':        True,
+    'f1':            True,
+    'n_on_multiple': False,
 }
 
 

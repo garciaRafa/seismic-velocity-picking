@@ -41,10 +41,9 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from run_experiment import (OPTIMIZERS, collect_metadata,    # noqa: E402
-                            resolve_params, run_seeds, run_single,
-                            summarize_runs)
-from src.analysis.compare import paired_table               # noqa: E402
+from run_experiment import (OPTIMIZERS, case_to_data,        # noqa: E402
+                            collect_metadata, resolve_params, run_line,
+                            run_seeds, run_single, summarize_runs)
 from src.analysis.stats import wilcoxon_signed_rank         # noqa: E402
 from src.seismic.cases import list_cases, load_case         # noqa: E402
 
@@ -54,12 +53,7 @@ _CASE_CACHE = {}
 def case_data(path):
     """Case in the dict format used by run_single (cached per process)."""
     if path not in _CASE_CACHE:
-        c = load_case(path)
-        _CASE_CACHE[path] = {
-            'name': c['name'], 'gather': c['gather'], 'offsets': c['offsets'],
-            't_grid': c['t_grid'], 'v_rms': c['v_rms_true'], 'dt_ms': c['dt_ms'],
-            'water_bottom_ms': c['meta']['water_bottom_ms'],
-        }
+        _CASE_CACHE[path] = case_to_data(load_case(path))
     return _CASE_CACHE[path]
 
 
@@ -116,22 +110,33 @@ def batch_summary(out_dir, cases, algorithms, results):
     """
     pairs = list(itertools.combinations(algorithms, 2))
     per_case, pooled = [], {}
+    first = results[cases[0]][algorithms[0]][0]
+    if 'f1' in first:          # formulation v3: detection scores
+        keys = ('f1', 'recall', 'n_picks', 'best_score')
+        labels = {'f1': 'F1', 'recall': 'Recall', 'n_picks': 'Number of picks K',
+                  'best_score': 'Score'}
+        fmts = {'f1': '.2f', 'recall': '.2f', 'n_picks': '.0f', 'best_score': '.3f'}
+    else:
+        keys = ('n_correct', 'rmse', 'best_score')
+        labels = {'n_correct': 'Correct picks', 'rmse': 'RMSE (m/s)', 'best_score': 'Score'}
+        fmts = {'n_correct': '.0f', 'rmse': '.1f', 'best_score': '.3f'}
 
     for name in cases:
         row = {'case': name}
         for alg in algorithms:
             runs = results[name][alg]
-            for key in ('n_correct', 'rmse', 'best_score'):
+            for key in keys:
                 row[f'{alg}.{key}.median'] = float(np.median([r[key] for r in runs]))
         for a, b in pairs:
-            table = paired_table(results[name][a], results[name][b])
-            for key in ('n_correct', 'rmse', 'best_score'):
-                row[f'{a}_vs_{b}.{key}.p'] = table[key]['wilcoxon_p']
+            for key in keys:
+                va = [r[key] for r in results[name][a]]
+                vb = [r[key] for r in results[name][b]]
+                row[f'{a}_vs_{b}.{key}.p'] = wilcoxon_signed_rank(va, vb)['p_value']
         per_case.append(row)
 
     for a, b in pairs:
         pooled[f'{a}_vs_{b}'] = {}
-        for key in ('n_correct', 'rmse', 'best_score'):
+        for key in keys:
             va = [r[key] for n in cases for r in results[n][a]]
             vb = [r[key] for n in cases for r in results[n][b]]
             test = wilcoxon_signed_rank(va, vb)
@@ -147,20 +152,21 @@ def batch_summary(out_dir, cases, algorithms, results):
         writer.writeheader()
         writer.writerows(per_case)
 
-    # Markdown / screen table: correct picks and RMSE per case
+    # Markdown / screen table, one block per metric
     lines = ["# Batch summary", "",
              "Medians over runs. p = two-sided Wilcoxon signed-rank (paired by seed).", ""]
-    for key, label in (('n_correct', 'Correct picks'), ('rmse', 'RMSE (m/s)'),
-                       ('best_score', 'Score')):
+    for key in keys:
+        label = labels[key]
         header = f"| Case | " + " | ".join(algorithms) + " | " + \
                  " | ".join(f"p {a} vs {b}" for a, b in pairs) + " |"
         lines += [f"## {label}", "", header,
                   "|" + "---|" * (1 + len(algorithms) + len(pairs))]
         for row in per_case:
-            fmt = '.0f' if key == 'n_correct' else ('.1f' if key == 'rmse' else '.3f')
+            fmt = fmts[key]
             vals = [format(row[f'{alg}.{key}.median'], fmt) for alg in algorithms]
             ps = [f"{row[f'{a}_vs_{b}.{key}.p']:.4f}" for a, b in pairs]
             lines.append(f"| {row['case']} | " + " | ".join(vals + ps) + " |")
+        fmt = fmts[key]
         for a, b in pairs:
             pl = pooled[f'{a}_vs_{b}'][key]
             lines.append(f"| **all cases** ({pl['n_pairs']} pairs) | "
@@ -254,8 +260,7 @@ def main():
         completed += 1
         elapsed = time.perf_counter() - t0
         print(f"  [{completed:4d}/{total}] {name:28s} {alg:13s} run {record['run'] + 1:3d}  "
-              f"correct={record['n_correct']:2d}  rmse={record['rmse']:7.1f}  "
-              f"({elapsed / 60:5.1f} min)", flush=True)
+              f"{run_line(record)}  ({elapsed / 60:5.1f} min)", flush=True)
 
     if args.workers > 1:
         with Pool(args.workers) as pool:
