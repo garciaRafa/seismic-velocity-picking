@@ -43,6 +43,7 @@ from src.analysis.metrics import velocity_errors            # noqa: E402
 from src.analysis.stats import summarize                    # noqa: E402
 from src.optimizers.hill_climbing import HillClimbing       # noqa: E402
 from src.optimizers.random_search import RandomSearch       # noqa: E402
+from src.optimizers.tabu_search import TabuSearch           # noqa: E402
 from src.seismic.cases import (build_velocity_profile,      # noqa: E402
                                load_case, water_bottom_time_ms)
 from src.seismic.synthetic import generate_cdp_gather       # noqa: E402
@@ -51,6 +52,7 @@ from src.seismic.synthetic import generate_cdp_gather       # noqa: E402
 OPTIMIZERS = {
     'HillClimbing': HillClimbing,
     'RandomSearch': RandomSearch,
+    'TabuSearch': TabuSearch
 }
 
 
