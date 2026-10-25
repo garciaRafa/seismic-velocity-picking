@@ -129,6 +129,10 @@ class HillClimbing(BaseOptimizer):
             self._current_score = best_neighbor_score
             self._update_best(self._current_picks, self._current_score)
 
+    def _record_extra(self):
+        """Trajectory field of Hill Climbing: index of the current restart."""
+        return {'restart': int(getattr(self, '_restart_index', 0))}
+
     # ------------------------------------------------------------------ #
     # Run with restarts                                                    #
     # ------------------------------------------------------------------ #
@@ -162,6 +166,8 @@ class HillClimbing(BaseOptimizer):
             self.rng = np.random.default_rng(restart_seed)
 
             self._initialize()
+            self._restart_index = restart
+            self._record('start' if restart == 0 else 'restart', iteration_done=False)
 
             restart_history = [self._current_score]
             stagnant        = 0
@@ -172,6 +178,7 @@ class HillClimbing(BaseOptimizer):
 
                 prev_score = self._current_score
                 self._iterate()
+                self._record('iter')
 
                 restart_history.append(self._current_score)
                 self.history.append(self.best_score)

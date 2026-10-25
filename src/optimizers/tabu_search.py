@@ -311,6 +311,7 @@ class TabuSearch(BaseOptimizer):
                 best_mark           = mark
                 best_kind           = kind
 
+        self._last_kind = best_kind          # move taken (None = no move)
         if best_neighbor is not None:
             self._current_picks = best_neighbor
             self._current_score = best_neighbor_score
@@ -326,6 +327,11 @@ class TabuSearch(BaseOptimizer):
             self._no_improve = 0
         else:
             self._no_improve += 1
+
+    def _record_extra(self):
+        """Trajectory fields of Tabu Search: move taken and active tabu size."""
+        return {'move': getattr(self, '_last_kind', None),
+                'tabu_size': int(self.active_tabu_size)}
 
     # ------------------------------------------------------------------ #
     # Run — single trajectory, no restarts                                 #
@@ -346,6 +352,8 @@ class TabuSearch(BaseOptimizer):
         self._reset_run_state()
         self.rng = np.random.default_rng(self.seed)   # same seed, same run
         self._initialize()
+        self._last_kind = None
+        self._record('start', iteration_done=False)
 
         self.stop_reason = 'max_iter'
         for it in range(self.max_iter):
@@ -356,6 +364,7 @@ class TabuSearch(BaseOptimizer):
                 self.stop_reason = 'patience'
                 break
             self._iterate()
+            self._record('iter')
             self.history.append(self.best_score)
         else:
             # Loop ran all max_iter iterations; the budget may still have
