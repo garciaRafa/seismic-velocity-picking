@@ -195,9 +195,11 @@ class TabuSearch(BaseOptimizer):
     def _jump_neighbor(self, picks):
         """
         Re-draw one pick uniformly inside its feasible box: time between
-        its neighbors (keeping min_sep) and velocity between its
-        neighbors' velocities (keeping monotonicity). The input must be
-        a valid, time-sorted solution; the result is then valid too.
+        its neighbors (keeping min_sep) and velocity between the bounds its
+        neighbors allow at that time (monotonicity, or the minimum
+        gradient). The input must be a valid, time-sorted solution; with
+        min_vel_gradient = 0 the result is always valid, otherwise it can
+        be invalid when no velocity fits (discarded by the caller).
 
         Same return convention as BaseOptimizer._generate_neighbor:
         (neighbor, idx, t_old, t_new).
@@ -209,11 +211,16 @@ class TabuSearch(BaseOptimizer):
 
         t_lo = self.t_min if idx == 0 else neighbor[idx - 1][0] + self.min_sep
         t_hi = self.t_max if idx == last else neighbor[idx + 1][0] - self.min_sep
-        v_lo = self.vel_min if idx == 0 else neighbor[idx - 1][1]
-        v_hi = self.vel_max if idx == last else neighbor[idx + 1][1]
-
         t_new = int(self.rng.integers(t_lo, t_hi + 1))
-        v_new = float(self.rng.uniform(v_lo, v_hi))
+
+        # Velocity bounds at the new time (monotonicity, or minimum gradient).
+        # If no velocity fits, the draw gives an invalid neighbor, which the
+        # caller discards with _is_valid.
+        g = self._dv_per_sample
+        v_lo = self.vel_min if idx == 0 else neighbor[idx - 1][1] + g * (t_new - neighbor[idx - 1][0])
+        v_hi = self.vel_max if idx == last else neighbor[idx + 1][1] - g * (neighbor[idx + 1][0] - t_new)
+        # (never empty with min_vel_gradient = 0, so the draws are unchanged)
+        v_new = float(self.rng.uniform(v_lo, v_hi)) if v_lo <= v_hi else v_lo
 
         neighbor[idx] = (t_new, v_new)
         return neighbor, idx, t_old, t_new
