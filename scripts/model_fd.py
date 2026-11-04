@@ -26,6 +26,7 @@ Needs Devito (pip install devito). Usage, from the project root:
 
     python scripts/model_fd.py
     python scripts/model_fd.py --config configs/synthetic_fd_model.json
+    python scripts/model_fd.py --config configs/synthetic_fd_model_multicdp.json
 """
 
 import argparse
@@ -69,6 +70,15 @@ def main():
                           acq['n_offsets']).astype(np.float32)
     t_out   = np.arange(0.0, acq['t_max_ms'] + acq['dt_ms'] / 2,
                         acq['dt_ms']).astype(np.float32)
+
+    # Every source and receiver must lie inside the model (cdp_x +- offset_max / 2)
+    for x in acq['cdp_x_m']:
+        src, rec = cdp_geometry(x, offsets)
+        if src.min() < 0.0 or rec.max() > cfg['model']['width_m']:
+            raise ValueError(
+                f"CDP at {x:.0f} m: the acquisition spans {src.min():.0f}-{rec.max():.0f} m, "
+                f"outside the model (0-{cfg['model']['width_m']:.0f} m). Use CDPs between "
+                f"{offsets.max() / 2:.0f} and {cfg['model']['width_m'] - offsets.max() / 2:.0f} m.")
 
     # One receiver line for all shots: regular line + every CDP receiver
     cdp_receivers = np.concatenate([cdp_geometry(x, offsets)[1]
