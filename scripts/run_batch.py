@@ -103,10 +103,29 @@ def save_experiment(folder, cfg, runs):
 # Summary tables                                                       #
 # ------------------------------------------------------------------ #
 
-def batch_summary(out_dir, cases, algorithms, results):
+def _pooled(results, case_list, pairs, keys):
+    """Pairwise Wilcoxon tests over all (case, run) pairs of case_list."""
+    out = {}
+    for a, b in pairs:
+        out[f'{a}_vs_{b}'] = {}
+        for key in keys:
+            va = [r[key] for n in case_list for r in results[n][a]]
+            vb = [r[key] for n in case_list for r in results[n][b]]
+            test = wilcoxon_signed_rank(va, vb)
+            out[f'{a}_vs_{b}'][key] = {
+                'median_a': float(np.median(va)), 'median_b': float(np.median(vb)),
+                'n_pairs': len(va), 'wilcoxon_p': test['p_value']}
+    return out
+
+
+def batch_summary(out_dir, cases, algorithms, results, groups=None):
     """
     Per-case medians of every algorithm, pairwise Wilcoxon tests per case,
     and pooled tests over all (case, run) pairs.
+
+    groups: optional {group name: [case names]} (batch config key
+    "groups"); adds pooled tests over the cases of each group, e.g. with
+    vs. without free surface, or development vs. held-out CDPs.
     """
     pairs = list(itertools.combinations(algorithms, 2))
     per_case, pooled = [], {}
@@ -134,18 +153,19 @@ def batch_summary(out_dir, cases, algorithms, results):
                 row[f'{a}_vs_{b}.{key}.p'] = wilcoxon_signed_rank(va, vb)['p_value']
         per_case.append(row)
 
-    for a, b in pairs:
-        pooled[f'{a}_vs_{b}'] = {}
-        for key in keys:
-            va = [r[key] for n in cases for r in results[n][a]]
-            vb = [r[key] for n in cases for r in results[n][b]]
-            test = wilcoxon_signed_rank(va, vb)
-            pooled[f'{a}_vs_{b}'][key] = {
-                'median_a': float(np.median(va)), 'median_b': float(np.median(vb)),
-                'n_pairs': len(va), 'wilcoxon_p': test['p_value']}
+    pooled = _pooled(results, cases, pairs, keys)
+    grouped = {}
+    for gname, glist in (groups or {}).items():
+        missing = [n for n in glist if n not in results]
+        if missing:
+            raise ValueError(f"group '{gname}': cases not in the batch: {missing}")
+        grouped[gname] = _pooled(results, glist, pairs, keys)
 
+    summary = {'per_case': per_case, 'pooled': pooled}
+    if grouped:
+        summary['groups'] = {g: {'cases': groups[g], 'pooled': grouped[g]} for g in grouped}
     with open(os.path.join(out_dir, 'batch_summary.json'), 'w') as f:
-        json.dump({'per_case': per_case, 'pooled': pooled}, f, indent=2)
+        json.dump(summary, f, indent=2)
 
     with open(os.path.join(out_dir, 'batch_summary.csv'), 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=list(per_case[0].keys()))
@@ -174,6 +194,16 @@ def batch_summary(out_dir, cases, algorithms, results):
                          f"{pl['wilcoxon_p']:.4f} |" if len(algorithms) == 2 else
                          f"| **all cases**, {a} vs {b} | {format(pl['median_a'], fmt)} "
                          f"| {format(pl['median_b'], fmt)} | {pl['wilcoxon_p']:.4f} |")
+        if grouped:
+            lines += ["", f"Groups ({label}): medians over the runs of the group's cases.", "",
+                      "| Group | Pair | median A | median B | pairs | p |",
+                      "|---|---|---|---|---|---|"]
+            for gname, gp in grouped.items():
+                for a, b in pairs:
+                    pl = gp[f'{a}_vs_{b}'][key]
+                    lines.append(f"| {gname} | {a} vs {b} | {format(pl['median_a'], fmt)} | "
+                                 f"{format(pl['median_b'], fmt)} | {pl['n_pairs']} | "
+                                 f"{pl['wilcoxon_p']:.4f} |")
         lines.append("")
     text = "\n".join(lines)
     with open(os.path.join(out_dir, 'batch_summary.md'), 'w') as f:
@@ -275,7 +305,7 @@ def main():
             results[name][alg].sort(key=lambda r: r['run'])
 
     print()
-    print(batch_summary(out_dir, cases, algorithms, results))
+    print(batch_summary(out_dir, cases, algorithms, results, groups=batch.get('groups')))
     print(f"Saved: {os.path.join(out_dir, 'batch_summary.md')}")
 
 
