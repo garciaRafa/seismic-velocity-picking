@@ -63,9 +63,6 @@
     "min_vel_gradient": 0.0
   },
   "algorithms": {
-    "RandomSearch": {
-      "max_evals": 100000
-    },
     "HillClimbing": {
       "max_iter": 10000,
       "restarts": 1000000,
