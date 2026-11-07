@@ -122,7 +122,12 @@ def case_to_data(c):
 
 
 SEMBLANCE_KEYS = ('stretch_mute', 'energy_floor', 'min_fold')
+# Evaluation-only keys of the formulation (not optimizer parameters):
+#   reference_alt_ratio : accept picks on the alternate maxima of each
+#                         reference event (src.analysis.reference); default None
+EVAL_KEYS = ('reference_alt_ratio',)
 _TAU_CACHE = {}
+_REF_CACHE = {}
 
 
 def semblance_options(params):
@@ -174,12 +179,17 @@ def detection_scores(data, params, times_ms, vels, tol=0.02, time_tol_ms=40.0):
     opts = semblance_options(params)
     meta = data.get('meta') or {}
     if 'primaries' in meta:
-        ref = get_reference(data['case'], **opts)
-        m = match_reference(times_ms, vels, ref, time_tol_ms=time_tol_ms, vel_tol=tol)
+        alt = params.get('reference_alt_ratio')
+        key = (data['name'], alt, tuple(sorted(opts.items())))
+        if key not in _REF_CACHE:
+            _REF_CACHE[key] = get_reference(data['case'], alt_ratio=alt, **opts)
+        m = match_reference(times_ms, vels, _REF_CACHE[key], time_tol_ms=time_tol_ms,
+                            vel_tol=tol)
         return {'n_picks': m['n_picks'], 'n_events': m['n_primaries'],
                 'precision': m['precision'], 'recall': m['recall'], 'f1': m['f1'],
                 'n_on_multiple': m['n_on_multiple'], 'pick_kind': m['kind'],
-                'reference': 'semblance_peaks'}
+                'reference': ('semblance_peaks' if alt is None
+                              else f'semblance_peaks_alt{alt:g}')}
 
     min_sep = max(1, int(np.ceil(params.get('min_sep_ms', 0.0) / data['dt_ms'] - 1e-9)))
     key = (data['name'], params['tau'], min_sep, tuple(sorted(opts.items())))
@@ -248,8 +258,9 @@ def run_single(opt_cls, params, data, seed, run_index, tol=0.02):
     The result depends only on (data, params, seed), so runs can be
     executed in any order or in parallel with identical results.
     """
+    opt_params = {k: v for k, v in params.items() if k not in EVAL_KEYS}
     opt = opt_cls(data['gather'], data['offsets'], data['dt_ms'],
-                  seed=int(seed), **params)
+                  seed=int(seed), **opt_params)
     opt.run()
 
     times_s, vels = opt.get_result()
