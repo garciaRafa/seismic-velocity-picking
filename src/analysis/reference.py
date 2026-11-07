@@ -23,6 +23,17 @@ How
     interior local maximum, its largest value is used and `on_edge` is
     set, so the case can be inspected.
 
+Alternates (optional, alt_ratio)
+    Some events have two (or more) comparable maxima inside the box — the
+    water bottom, for instance, has one near 506 ms / 1520 m/s and one
+    near 544 ms / 1490 m/s, the same reflection. A picker may choose
+    either; with a single point and a 2% tolerance the other one counts as
+    a wrong pick AND a missed event. With alt_ratio set, every other
+    interior local maximum of the box with S >= alt_ratio * S_peak is kept
+    in 'alternates', and match_reference accepts a pick near the peak or
+    near any alternate. Off by default (the reference is the single peak,
+    as before).
+
 The model is used only to say WHERE to look (evaluation only); the
 algorithms never see these picks.
 """
@@ -35,18 +46,22 @@ ROBUST_OPTION_KEYS = ('stretch_mute', 'energy_floor', 'min_fold')
 
 
 def semblance_peak(gather, offsets, dt_ms, t0_ms, v0, time_win_ms=40.0,
-                   vel_win=0.08, vel_step=5.0, t_start_ms=0.0, **semblance_opts):
+                   vel_win=0.08, vel_step=5.0, t_start_ms=0.0, alt_ratio=None,
+                   **semblance_opts):
     """
     Semblance peak of one event near (t0_ms, v0).
 
     semblance_opts : robust-semblance options (stretch_mute, energy_floor,
                      min_fold, e_ref), passed to compute_semblance — use the
                      same ones as the objective being evaluated
+    alt_ratio      : None (default) or a fraction in (0, 1]: also return the
+                     other interior local maxima with S >= alt_ratio * S_peak
 
     Returns
     -------
     dict with t_ms, v (peak position), s (semblance at the peak) and
-    on_edge (True when no interior local maximum exists in the box)
+    on_edge (True when no interior local maximum exists in the box); with
+    alt_ratio, also alternates: list of {t_ms, v, s}, strongest first
     """
     n_samples = gather.shape[1]
     t_grid = t_start_ms + dt_ms * np.arange(n_samples)
@@ -73,8 +88,19 @@ def semblance_peak(gather, offsets, dt_ms, t0_ms, v0, time_win_ms=40.0,
         i, j = np.unravel_index(np.argmax(box), box.shape)
         on_edge = True
 
-    return {'t_ms': float(t_grid[rows[i]]), 'v': float(vels[j]),
-            's': float(box[i, j]), 'on_edge': bool(on_edge)}
+    out = {'t_ms': float(t_grid[rows[i]]), 'v': float(vels[j]),
+           's': float(box[i, j]), 'on_edge': bool(on_edge)}
+    if alt_ratio is not None:
+        if not 0.0 < alt_ratio <= 1.0:
+            raise ValueError("alt_ratio must be in (0, 1].")
+        alts = []
+        for a, b in zip(*np.nonzero(is_max)):
+            a, b = a + 1, b + 1
+            if (a, b) != (i, j) and box[a, b] >= alt_ratio * box[i, j]:
+                alts.append({'t_ms': float(t_grid[rows[a]]), 'v': float(vels[b]),
+                             's': float(box[a, b])})
+        out['alternates'] = sorted(alts, key=lambda d: -d['s'])
+    return out
 
 
 def reference_picks(gather, offsets, dt_ms, primaries, multiples=(), **kwargs):
@@ -107,7 +133,8 @@ def match_reference(times_ms, vels, reference, time_tol_ms=40.0, vel_tol=0.02):
     A pick MATCHES a reference point when it is within time_tol_ms of its
     time AND within vel_tol (relative) of its velocity. Each pick is
     labeled with the closest matching point (in time), primary or
-    multiple.
+    multiple. When a reference point has 'alternates' (reference_picks
+    with alt_ratio), a pick near any of them matches that event too.
 
         precision = picks on a primary / picks
         recall    = primaries found   / primaries
@@ -124,17 +151,27 @@ def match_reference(times_ms, vels, reference, time_tol_ms=40.0, vel_tol=0.02):
     """
     times_ms = np.asarray(times_ms, dtype=float)
     vels = np.asarray(vels, dtype=float)
-    ref_t = np.array([r['t_ms'] for r in reference], dtype=float)
-    ref_v = np.array([r['v'] for r in reference], dtype=float)
     kinds = np.array([r['kind'] for r in reference])
+    # Every acceptable point of every event: the peak and its alternates
+    pts = [(k, r['t_ms'], r['v']) for k, r in enumerate(reference)]
+    pts += [(k, a['t_ms'], a['v']) for k, r in enumerate(reference)
+            for a in r.get('alternates', ())]
+    owner = np.array([p[0] for p in pts], dtype=int)
+    ref_t = np.array([p[1] for p in pts], dtype=float)
+    ref_v = np.array([p[2] for p in pts], dtype=float)
 
-    if times_ms.size and ref_t.size:
-        dt = np.abs(times_ms[:, None] - ref_t[None, :])
-        hit = (dt <= time_tol_ms) & (np.abs(vels[:, None] - ref_v[None, :])
-                                     <= vel_tol * ref_v[None, :])
-        dt = np.where(hit, dt, np.inf)
+    if times_ms.size and len(reference):
+        d = np.abs(times_ms[:, None] - ref_t[None, :])
+        ok = (d <= time_tol_ms) & (np.abs(vels[:, None] - ref_v[None, :])
+                                   <= vel_tol * ref_v[None, :])
+        d = np.where(ok, d, np.inf)
+        # per event: closest acceptable point
+        dt = np.full((times_ms.size, len(reference)), np.inf)
+        for k in range(len(reference)):
+            dt[:, k] = d[:, owner == k].min(axis=1)
+        hit = np.isfinite(dt)
     else:
-        hit = np.zeros((times_ms.size, ref_t.size), dtype=bool)
+        hit = np.zeros((times_ms.size, len(reference)), dtype=bool)
         dt = np.full(hit.shape, np.inf)
 
     label, kind = [], []
@@ -178,9 +215,13 @@ def _robust_options(semblance_opts):
     return opts
 
 
-def get_reference(case, **semblance_opts):
+def get_reference(case, alt_ratio=None, **semblance_opts):
     """
     Reference picks of a case for a given semblance.
+
+    alt_ratio : None (default: stored reference, single peak per event) or
+                a fraction: recomputed with alternates (see reference_picks;
+                a few seconds per case)
 
     The reference must come from the same semblance the algorithms see:
     - plain semblance (no robust option on): meta['reference_picks'];
@@ -192,6 +233,11 @@ def get_reference(case, **semblance_opts):
     """
     meta = case['meta']
     opts = _robust_options(semblance_opts)
+    if alt_ratio is not None:
+        return reference_picks(case['gather'], case['offsets'], case['dt_ms'],
+                               meta['primaries'], meta.get('surface_multiples', []),
+                               alt_ratio=alt_ratio,
+                               **(opts if _is_robust(**opts) else {}))
     if not _is_robust(**opts):
         return meta['reference_picks']
     if meta.get('reference_picks_robust_options') == opts:

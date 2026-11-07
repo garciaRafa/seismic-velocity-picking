@@ -108,3 +108,51 @@ def test_match_reference_needs_time_and_velocity():
 def test_match_reference_empty():
     m = match_reference([], [], REF)
     assert m['precision'] == 0.0 and m['recall'] == 0.0 and m['found'] == [False, False]
+
+# ---------------------------------------------------------------------- #
+# Alternate maxima (alt_ratio)                                            #
+# ---------------------------------------------------------------------- #
+
+from src.analysis.reference import match_reference as _match   # noqa: E402
+
+
+def _ref_with_alt(alt=True):
+    r = {'name': 'wb', 'kind': 'primary', 't_ms': 544.0, 'v': 1490.0, 's': 0.97, 'on_edge': False}
+    if alt:
+        r['alternates'] = [{'t_ms': 506.0, 'v': 1520.0, 's': 0.97}]
+    return [r, {'name': 'm', 'kind': 'multiple', 't_ms': 1060.0, 'v': 1505.0, 's': 0.6,
+                'on_edge': False}]
+
+
+def test_pick_on_an_alternate_matches_the_event():
+    strict = _match([506.0], [1521.0], _ref_with_alt(alt=False))
+    loose = _match([506.0], [1521.0], _ref_with_alt(alt=True))
+    assert strict['n_on_primary'] == 0 and strict['recall'] == 0.0      # 2.08% > 2%
+    assert loose['n_on_primary'] == 1 and loose['recall'] == 1.0 and loose['f1'] == 1.0
+    assert loose['label'] == ['wb'] and loose['kind'] == ['primary']
+
+
+def test_two_picks_on_peak_and_alternate_find_the_event_once():
+    m = _match([544.0, 506.0], [1490.0, 1520.0], _ref_with_alt())
+    assert m['n_found'] == 1 and m['n_on_primary'] == 2 and m['recall'] == 1.0
+
+
+def test_alternates_do_not_change_the_rest_of_the_matching():
+    times, vels = [544.0, 1060.0, 1500.0], [1490.0, 1505.0, 2500.0]
+    a = _match(times, vels, _ref_with_alt(alt=False))
+    b = _match(times, vels, _ref_with_alt(alt=True))
+    assert a == b
+
+
+def test_semblance_peak_alternates(layered_gather):
+    from src.analysis.reference import semblance_peak
+    d = layered_gather
+    base = semblance_peak(d['gather'], d['offsets'], d['dt_ms'], 800.0, 1500.0)
+    assert 'alternates' not in base
+    alt = semblance_peak(d['gather'], d['offsets'], d['dt_ms'], 800.0, 1500.0, alt_ratio=0.5)
+    assert {k: alt[k] for k in base} == base                 # same peak
+    assert all(a['s'] >= 0.5 * alt['s'] for a in alt['alternates'])
+    assert [a['s'] for a in alt['alternates']] == sorted((a['s'] for a in alt['alternates']),
+                                                         reverse=True)
+    with pytest.raises(ValueError):
+        semblance_peak(d['gather'], d['offsets'], d['dt_ms'], 800.0, 1500.0, alt_ratio=0.0)
