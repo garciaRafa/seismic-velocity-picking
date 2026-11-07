@@ -75,6 +75,14 @@ class BaseOptimizer(ABC):
                  current one).
     record_every : int — keep one trajectory record every `record_every`
                  iterations (starts and restarts are always kept).
+    cache_semblance : bool — keep the semblance of every pick already
+                 computed and reuse it (off by default). The objective is a
+                 sum (or mean) of one term per pick and a move changes one
+                 pick, so the other picks of a neighbor are not computed
+                 again. The values, the order of the sum and therefore the
+                 results are exactly the same as without the cache; only
+                 the time changes. Every call still counts as one
+                 evaluation (n_evals). Cache statistics: self.cache_stats.
     stretch_mute, energy_floor, min_fold : robust-semblance options
                  (src/seismic/semblance.py): NMO stretch mute, energy
                  floor of the denominator and minimum number of live
@@ -108,7 +116,7 @@ class BaseOptimizer(ABC):
                  p_insert=0.1, p_remove=0.1,
                  stretch_mute=None, energy_floor=0.0, min_fold=1,
                  record_trajectory=False, record_every=1,
-                 min_vel_gradient=0.0):
+                 min_vel_gradient=0.0, cache_semblance=False):
 
         self.traces   = traces
         self.offsets  = offsets
@@ -190,6 +198,13 @@ class BaseOptimizer(ABC):
         self.record_trajectory = bool(record_trajectory)
         self.record_every      = max(1, int(record_every))
 
+        # Semblance of the picks already computed (cache_semblance=True).
+        # Depends only on the data and the semblance options, so it is kept
+        # across runs of the same optimizer.
+        self.cache_semblance = bool(cache_semblance)
+        self._s_cache = {}
+        self.cache_stats = {'hits': 0, 'misses': 0}
+
         # Own random generator (see "Randomness" above)
         self.rng = np.random.default_rng(seed)
 
@@ -246,6 +261,8 @@ class BaseOptimizer(ABC):
             current = set(getattr(self, '_current_picks', None) or ())
             self._proposals.extend((p[0], p[1], self.n_evals)
                                    for p in picks if p not in current)
+        if self.cache_semblance:
+            return self._evaluate_cached(picks)
         if self.variable_k:
             return picking_objective_threshold(
                 self.traces, self.offsets, picks, self.dt_ms, self.tau,
@@ -254,6 +271,29 @@ class BaseOptimizer(ABC):
         return picking_objective(
             self.traces, self.offsets, picks, self.dt_ms, **self._semblance_opts
         )
+
+    def _pick_semblance(self, time_sample, velocity):
+        """Semblance of one pick, from the cache when already computed."""
+        key = (int(time_sample), velocity)
+        s = self._s_cache.get(key)
+        if s is None:
+            from src.seismic.semblance import DEFAULT_WINDOW, semblance_at_pick
+            s = semblance_at_pick(self.traces, self.offsets, velocity, int(time_sample),
+                                  self.dt_ms, 0.0, DEFAULT_WINDOW, **self._semblance_opts)
+            self._s_cache[key] = s
+            self.cache_stats['misses'] += 1
+        else:
+            self.cache_stats['hits'] += 1
+        return s
+
+    def _evaluate_cached(self, picks):
+        """
+        Same value as picking_objective(_threshold), term by term and in
+        the same order, with the semblance of each pick taken from the cache.
+        """
+        if self.variable_k:
+            return float(sum(self._pick_semblance(t, v) - self.tau for t, v in picks))
+        return float(np.mean([self._pick_semblance(t, v) for t, v in picks]))
 
     @property
     def budget_exhausted(self):
