@@ -57,6 +57,7 @@ from src.analysis.metrics import velocity_errors            # noqa: E402
 from src.analysis.reference import get_reference, match_reference  # noqa: E402
 from src.analysis.stats import summarize                    # noqa: E402
 from src.optimizers.hill_climbing import HillClimbing       # noqa: E402
+from src.optimizers.memetic import MemeticAlgorithm         # noqa: E402
 from src.optimizers.random_search import RandomSearch       # noqa: E402
 from src.optimizers.simulated_annealing import SimulatedAnnealing  # noqa: E402
 from src.optimizers.tabu_search import TabuSearch           # noqa: E402
@@ -72,6 +73,7 @@ OPTIMIZERS = {
     'RandomSearch': RandomSearch,
     'TabuSearch':   TabuSearch,
     'SimulatedAnnealing': SimulatedAnnealing,
+    'MemeticAlgorithm': MemeticAlgorithm,
 }
 
 
