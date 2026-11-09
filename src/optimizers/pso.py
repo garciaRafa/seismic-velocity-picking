@@ -286,7 +286,8 @@ class ParticleSwarm(BaseOptimizer):
         return {'iteration': int(getattr(self, 'iteration', 0)),
                 'gbest_score': float(self.gbest_score),
                 'mean_active_slots': None if k is None else float(k.mean()),
-                'swarm_spread': float(np.mean(np.std(self.x[:, :, :2], axis=0) / self._range[:2]))}
+                'swarm_spread': float(np.mean(np.std(self.x[:, :, :2], axis=0) / self._range[:2])),
+                'restarts': int(getattr(self, 'stats', {}).get('restarts', 0))}
 
     def run(self):
         """Global-best PSO until the budget is used up. self.history: best score per iteration."""
