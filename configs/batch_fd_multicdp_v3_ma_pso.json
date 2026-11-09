@@ -1,0 +1,106 @@
+{
+  "name": "fd_multicdp_v3_ma_pso",
+  "cases_dir": "cases",
+  "cases": [
+    "fd_layered_cdp1800_fs",
+    "fd_layered_cdp1800_nofs",
+    "fd_layered_cdp2200_fs",
+    "fd_layered_cdp2200_nofs",
+    "fd_layered_cdp2500_fs",
+    "fd_layered_cdp2500_nofs",
+    "fd_layered_cdp2900_fs",
+    "fd_layered_cdp2900_nofs",
+    "fd_layered_cdp3200_fs",
+    "fd_layered_cdp3200_nofs",
+    "fd_layered_cdp3400_fs",
+    "fd_layered_cdp3400_nofs"
+  ],
+  "groups": {
+    "free surface": [
+      "fd_layered_cdp1800_fs",
+      "fd_layered_cdp2200_fs",
+      "fd_layered_cdp2500_fs",
+      "fd_layered_cdp2900_fs",
+      "fd_layered_cdp3200_fs",
+      "fd_layered_cdp3400_fs"
+    ],
+    "no free surface": [
+      "fd_layered_cdp1800_nofs",
+      "fd_layered_cdp2200_nofs",
+      "fd_layered_cdp2500_nofs",
+      "fd_layered_cdp2900_nofs",
+      "fd_layered_cdp3200_nofs",
+      "fd_layered_cdp3400_nofs"
+    ],
+    "held-out CDPs (all but 2500)": [
+      "fd_layered_cdp1800_fs",
+      "fd_layered_cdp1800_nofs",
+      "fd_layered_cdp2200_fs",
+      "fd_layered_cdp2200_nofs",
+      "fd_layered_cdp2900_fs",
+      "fd_layered_cdp2900_nofs",
+      "fd_layered_cdp3200_fs",
+      "fd_layered_cdp3200_nofs",
+      "fd_layered_cdp3400_fs",
+      "fd_layered_cdp3400_nofs"
+    ]
+  },
+  "n_runs": 10,
+  "master_seed": 2026,
+  "correct_tol": 0.02,
+  "formulation": {
+    "vel_min": 1400.0,
+    "vel_max": 5000.0,
+    "min_sep_ms": 200.0,
+    "t_max_ms": 2150.0,
+    "objective": "threshold",
+    "tau": "auto",
+    "tau_factor": 10.0,
+    "p_insert": 0.1,
+    "p_remove": 0.1,
+    "stretch_mute": 0.5,
+    "energy_floor": 0.01,
+    "min_fold": 10,
+    "min_vel_gradient": 200.0,
+    "reference_alt_ratio": 0.9,
+    "cache_semblance": true
+  },
+  "algorithms": {
+    "MemeticAlgorithm": {
+      "pop_size": 20,
+      "tournament_size": 2,
+      "n_cuts": 1,
+      "p_mutation": 0.5,
+      "step_time": 5,
+      "step_vel": 50.0,
+      "n_neighbors": 10,
+      "ls_patience": 5,
+      "ls_initial": true,
+      "div_time_ms": 40.0,
+      "div_vel": 0.02,
+      "restart_after": 100,
+      "max_evals": 100000
+    },
+    "ParticleSwarm": {
+      "swarm_size": 30,
+      "w": 0.72,
+      "c1": 1.49,
+      "c2": 1.49,
+      "v_max_frac": 0.2,
+      "restart_after": 50,
+      "max_evals": 100000
+    },
+    "ParticleSwarmLevy": {
+      "swarm_size": 30,
+      "w": 0.72,
+      "c1": 1.49,
+      "c2": 1.49,
+      "v_max_frac": 0.2,
+      "restart_after": 50,
+      "max_evals": 100000,
+      "p_levy": 0.2,
+      "levy_scale": 0.01,
+      "levy_beta": 1.5
+    }
+  }
+}
